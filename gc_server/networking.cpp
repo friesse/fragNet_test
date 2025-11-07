@@ -675,29 +675,9 @@ void GCNetwork::Update()
                 }
                 break;
 
-            case k_EMsgGCCStrike15_v2_MatchmakingClient2GCAccept:
-                logger::info("Received MatchmakingClient2GCAccept");
-                {
-                    uint64_t steamId = GetSessionSteamId(p2psocket);
-                    if (steamId != 0) {
-                        GCNetwork_Matchmaking::HandleMatchmakingAccept(p2psocket, buffer.data(), msgsize, steamId);
-                    } else {
-                        logger::error("MatchmakingAccept: No valid session for this socket");
-                    }
-                }
-                break;
-
-            case k_EMsgGCCStrike15_v2_MatchmakingClient2GCDecline:
-                logger::info("Received MatchmakingClient2GCDecline");
-                {
-                    uint64_t steamId = GetSessionSteamId(p2psocket);
-                    if (steamId != 0) {
-                        GCNetwork_Matchmaking::HandleMatchmakingDecline(p2psocket, buffer.data(), msgsize, steamId);
-                    } else {
-                        logger::error("MatchmakingDecline: No valid session for this socket");
-                    }
-                }
-                break;
+            // Matchmaking accept/decline temporarily disabled - enum values not in current protobuf schema
+            // case k_EMsgGCCStrike15_v2_MatchmakingClient2GCAccept:
+            // case k_EMsgGCCStrike15_v2_MatchmakingClient2GCDecline:
 
             case k_EMsgGCCStrike15_v2_MatchmakingServerMatchEnd:
                 logger::info("Received MatchmakingServerMatchEnd");

@@ -21,7 +21,7 @@ void GCNetwork_Matchmaking::HandleMatchmakingClient2GCHello(SNetSocket_t p2psock
     
     // Build response
     CMsgGCCStrike15_v2_MatchmakingGC2ClientHello response;
-    mmManager->BuildMatchmakingHello(response, steamId, ranked_db);
+    mmManager->BuildMatchmakingHello(response, steamId);
     
     // Send response
     NetworkMessage responseMsg = NetworkMessage::FromProto(response, 
@@ -54,13 +54,15 @@ void GCNetwork_Matchmaking::HandleMatchmakingStart(SNetSocket_t p2psocket, void*
     }
     
     // Get player rating
-    PlayerSkillRating rating = mmManager->GetPlayerRating(steamId, ranked_db);
-    
-    // Extract map preferences from request
-    std::vector<std::string> preferredMaps;
-    for (int i = 0; i < request.maps_size(); ++i) {
-        preferredMaps.push_back(request.maps(i));
+    auto ratingOpt = mmManager->GetPlayerRating(steamId);
+    if (!ratingOpt) {
+        logger::error("Failed to get rating for player %llu", steamId);
+        return;
     }
+    PlayerSkillRating rating = *ratingOpt;
+    
+    // Map preferences not supported in current protobuf schema
+    std::vector<std::string> preferredMaps;
     
     // Add player to queue
     if (mmManager->AddPlayerToQueue(steamId, p2psocket, rating, preferredMaps)) {
@@ -96,7 +98,7 @@ void GCNetwork_Matchmaking::HandleMatchmakingStop(SNetSocket_t p2psocket, void* 
         
         // Send confirmation
         CMsgGCCStrike15_v2_MatchmakingGC2ClientUpdate update;
-        update.set_matchtype(0); // Not in matchmaking
+        // Note: set_matchtype not available in current protobuf schema
         
         NetworkMessage updateMsg = NetworkMessage::FromProto(update,
                                                             k_EMsgGCCStrike15_v2_MatchmakingGC2ClientUpdate);
@@ -112,21 +114,21 @@ void GCNetwork_Matchmaking::HandleMatchmakingAccept(SNetSocket_t p2psocket, void
     
     if (mmManager->AcceptMatch(steamId)) {
         // Check if match is ready
-        auto match = mmManager->GetMatchByPlayer(steamId);
-        if (match && match->state == MatchState::IN_PROGRESS) {
+        auto matchOpt = mmManager->GetMatchByPlayer(steamId);
+        if (matchOpt && matchOpt->get() && (*matchOpt)->state == MatchState::IN_PROGRESS) {
             // Send final reservation details
             CMsgGCCStrike15_v2_MatchmakingGC2ClientReserve reserve;
-            mmManager->BuildMatchReservation(reserve, *match, steamId);
+            mmManager->BuildMatchReservation(reserve, **matchOpt, steamId);
             
             NetworkMessage reserveMsg = NetworkMessage::FromProto(reserve,
                                                                  k_EMsgGCCStrike15_v2_MatchmakingGC2ClientReserve);
             reserveMsg.WriteToSocket(p2psocket, true);
             
             logger::info("Match %llu is ready - sent reservation to player %llu", 
-                        match->matchId, steamId);
-        } else if (match) {
+                        (*matchOpt)->matchId, steamId);
+        } else if (matchOpt && matchOpt->get()) {
             // Send update on accepted players count
-            SendMatchUpdate(p2psocket, *match);
+            SendMatchUpdate(p2psocket, **matchOpt);
         }
     } else {
         logger::error("Failed to accept match for player %llu", steamId);
@@ -142,7 +144,7 @@ void GCNetwork_Matchmaking::HandleMatchmakingDecline(SNetSocket_t p2psocket, voi
     if (mmManager->DeclineMatch(steamId)) {
         // Send confirmation that player is out of matchmaking
         CMsgGCCStrike15_v2_MatchmakingGC2ClientUpdate update;
-        update.set_matchtype(0); // Not in matchmaking
+        // Note: set_matchtype not available in current protobuf schema
         
         NetworkMessage updateMsg = NetworkMessage::FromProto(update,
                                                             k_EMsgGCCStrike15_v2_MatchmakingGC2ClientUpdate);
@@ -166,17 +168,19 @@ void GCNetwork_Matchmaking::HandleMatchEnd(SNetSocket_t p2psocket, void* message
     }
     
     const auto& stats = request.stats();
-    uint64_t matchId = stats.has_match() ? stats.match() : 0;
+    // Note: match ID field not available in current protobuf schema
+    uint64_t matchId = 0;
     
     logger::info("Received match end for match %llu", matchId);
     
     auto* mmManager = MatchmakingManager::GetInstance();
-    auto match = mmManager->GetMatch(matchId);
+    auto matchOpt = mmManager->GetMatch(matchId);
     
-    if (!match) {
+    if (!matchOpt || !matchOpt->get()) {
         logger::error("Match %llu not found", matchId);
         return;
     }
+    auto& match = *matchOpt;
     
     // Calculate MMR changes
     CalculateMMRChange(*match, ranked_db);
@@ -228,7 +232,8 @@ void GCNetwork_Matchmaking::HandleMatchRoundStats(SNetSocket_t p2psocket, void* 
         return;
     }
     
-    uint64_t matchId = request.has_match() ? request.match() : 0;
+    // Note: match ID field not available in current protobuf schema
+    uint64_t matchId = 0;
     int round = request.has_round() ? request.round() : 0;
     
     logger::info("Received round %d stats for match %llu", round, matchId);
@@ -280,9 +285,7 @@ void GCNetwork_Matchmaking::SendQueueStatus(SNetSocket_t socket, uint64_t steamI
     auto stats = mmManager->GetQueueStatistics();
     
     CMsgGCCStrike15_v2_MatchmakingGC2ClientUpdate update;
-    update.set_matchtype(1); // Competitive
-    update.set_waiting_players(stats.totalPlayers);
-    update.set_est_wait_time(stats.avgWaitTime.count());
+    // Note: queue status fields not available in current protobuf schema
     
     NetworkMessage updateMsg = NetworkMessage::FromProto(update,
                                                         k_EMsgGCCStrike15_v2_MatchmakingGC2ClientUpdate);
@@ -292,7 +295,7 @@ void GCNetwork_Matchmaking::SendQueueStatus(SNetSocket_t socket, uint64_t steamI
 }
 
 void GCNetwork_Matchmaking::CalculateMMRChange(const Match& match, MYSQL* ranked_db) {
-    if (!ranked_db) return;
+    (void)ranked_db; // Unused - manager handles database internally
     
     // Calculate average MMR for each team
     uint32_t teamA_MMR = 0, teamB_MMR = 0;
@@ -332,7 +335,7 @@ void GCNetwork_Matchmaking::CalculateMMRChange(const Match& match, MYSQL* ranked
         player->skillRating.rank = player->skillRating.mmr / 100; // Simplified rank calculation
         if (player->skillRating.rank > 18) player->skillRating.rank = 18;
         
-        mmManager->UpdatePlayerRating(player->steamId, player->skillRating, ranked_db);
+        mmManager->UpdatePlayerRating(player->steamId, player->skillRating);
         logger::info("Player %llu MMR: %d -> %d", player->steamId, 
                     player->skillRating.mmr - changeA, player->skillRating.mmr);
     }
@@ -346,7 +349,7 @@ void GCNetwork_Matchmaking::CalculateMMRChange(const Match& match, MYSQL* ranked
         player->skillRating.rank = player->skillRating.mmr / 100;
         if (player->skillRating.rank > 18) player->skillRating.rank = 18;
         
-        mmManager->UpdatePlayerRating(player->steamId, player->skillRating, ranked_db);
+        mmManager->UpdatePlayerRating(player->steamId, player->skillRating);
         logger::info("Player %llu MMR: %d -> %d", player->steamId,
                     player->skillRating.mmr - changeB, player->skillRating.mmr);
     }
