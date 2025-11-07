@@ -184,3 +184,6 @@ else()
         add_link_options(-Wl,--no-undefined)
     endif()
 endif()
+
+add_subdirectory(steamworks)
+add_subdirectory(gc_server)

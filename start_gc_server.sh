@@ -34,17 +34,19 @@ fi
 
 # Find the gc_server executable
 GC_SERVER=""
-if [ -f "$SCRIPT_DIR/build/gc_server/gc_server" ]; then
-    GC_SERVER="$SCRIPT_DIR/build/gc_server/gc_server"
-elif [ -f "$SCRIPT_DIR/build/gc_server" ]; then
-    GC_SERVER="$SCRIPT_DIR/build/gc_server"
-elif [ -f "$SCRIPT_DIR/gc_server" ]; then
+GC_SERVER=$(find "$SCRIPT_DIR/build" -maxdepth 3 -type f \( -name 'gc-server*' -o -name 'gc_server*' \) 2>/dev/null | head -n1)
+if [ -z "$GC_SERVER" ] && [ -f "$SCRIPT_DIR/gc-server" ]; then
+    GC_SERVER="$SCRIPT_DIR/gc-server"
+fi
+if [ -z "$GC_SERVER" ] && [ -f "$SCRIPT_DIR/gc_server" ]; then
     GC_SERVER="$SCRIPT_DIR/gc_server"
-else
+fi
+if [ -z "$GC_SERVER" ]; then
     echo -e "${RED}ERROR: gc_server executable not found!${NC}"
     echo "Checked locations:"
-    echo "  - $SCRIPT_DIR/build/gc_server/gc_server"
-    echo "  - $SCRIPT_DIR/build/gc_server"
+    echo "  - $SCRIPT_DIR/build/**/gc-server*"
+    echo "  - $SCRIPT_DIR/build/**/gc_server*"
+    echo "  - $SCRIPT_DIR/gc-server"
     echo "  - $SCRIPT_DIR/gc_server"
     exit 1
 fi

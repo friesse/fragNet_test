@@ -77,19 +77,15 @@ jobs:
         # Create release directory
         mkdir -p ${{ github.workspace }}/release/gc_server
         
-        # Find the built binary
-        if [ -f "${{ github.workspace }}/build/gc_server/gc_server" ]; then
-            echo "Found binary at: ${{ github.workspace }}/build/gc_server/gc_server"
-            cp "${{ github.workspace }}/build/gc_server/gc_server" "${{ github.workspace }}/release/gc_server/"
-        elif [ -f "${{ github.workspace }}/build/Release/gc_server/gc_server" ]; then
-            echo "Found binary at: ${{ github.workspace }}/build/Release/gc_server/gc_server"
-            cp "${{ github.workspace }}/build/Release/gc_server/gc_server" "${{ github.workspace }}/release/gc_server/"
-        else
+        BIN="$(find "${{ github.workspace }}/build" -maxdepth 4 -type f \( -name 'gc-server*' -o -name 'gc_server*' \) | head -n1)"
+        if [ -z "$BIN" ]; then
             echo "Error: Could not find built binary. Build may have failed."
             echo "Build directory contents:"
-            find "${{ github.workspace }}/build" -type f -executable -print -o -name "gc_server" -print
+            find "${{ github.workspace }}/build" -type f -print | sort
             exit 1
         fi
+        echo "Found binary at: $BIN"
+        cp "$BIN" "${{ github.workspace }}/release/gc_server/"
         
         # Copy additional files
         cp -v "${{ github.workspace }}/README.md" "${{ github.workspace }}/release/" || echo "README.md not found, skipping"
@@ -106,8 +102,7 @@ jobs:
             chmod +x "${{ github.workspace }}/release/start_gc_server.sh"
         fi
         
-        # Make the binary executable
-        chmod +x "${{ github.workspace }}/release/gc_server/gc_server"
+        chmod +x "${{ github.workspace }}/release/gc_server"/* || true
 
     # Windows Build
     - if: matrix.os == 'windows-latest'
@@ -124,7 +119,8 @@ jobs:
       shell: bash
       run: |
         mkdir -p ${{ github.workspace }}/release/gc_server
-        cp ${{ github.workspace }}/build/gc_server/${{ matrix.build_type }}/gc_server.exe ${{ github.workspace }}/release/gc_server/ || true
+        BIN="$(find "${{ github.workspace }}/build" -type f \( -name 'gc-server*.exe' -o -name 'gc_server*.exe' \) 2>/dev/null | head -n1)"
+        [ -n "$BIN" ] && cp "$BIN" ${{ github.workspace }}/release/gc_server/ || true
         cp ${{ github.workspace }}/README.md ${{ github.workspace }}/release/ || true
         cp ${{ github.workspace }}/QUICK_START.md ${{ github.workspace }}/release/ || true
         cp -r ${{ github.workspace }}/items ${{ github.workspace }}/release/ || true
