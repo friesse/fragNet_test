@@ -734,7 +734,7 @@ void MatchmakingManager::CheckReadyUpTimeouts() {
 bool MatchmakingManager::IsPlayerInQueue(uint64_t steamId) const {
     std::shared_lock<std::shared_mutex> lock(m_queueMutex);
     
-    for (const auto& [bracket, queue] : m_queues) {
+    for (const auto& [bracket, queue] : m_queuesBySkill) {
         for (const auto& entry : queue) {
             if (entry && entry->steamId == steamId) {
                 return true;
@@ -757,7 +757,7 @@ bool MatchmakingManager::AcceptMatch(uint64_t steamId) {
         bool found = false;
         for (auto& player : match->teamA) {
             if (player && player->steamId == steamId) {
-                player->hasAccepted = true;
+                player->acceptedMatch.store(true);
                 found = true;
                 break;
             }
@@ -765,7 +765,7 @@ bool MatchmakingManager::AcceptMatch(uint64_t steamId) {
         if (!found) {
             for (auto& player : match->teamB) {
                 if (player && player->steamId == steamId) {
-                    player->hasAccepted = true;
+                    player->acceptedMatch.store(true);
                     found = true;
                     break;
                 }
@@ -776,14 +776,14 @@ bool MatchmakingManager::AcceptMatch(uint64_t steamId) {
             // Check if all players have accepted
             bool allAccepted = true;
             for (const auto& p : match->teamA) {
-                if (p && !p->hasAccepted) {
+                if (p && !p->acceptedMatch.load()) {
                     allAccepted = false;
                     break;
                 }
             }
             if (allAccepted) {
                 for (const auto& p : match->teamB) {
-                    if (p && !p->hasAccepted) {
+                    if (p && !p->acceptedMatch.load()) {
                         allAccepted = false;
                         break;
                     }
