@@ -2,6 +2,7 @@
 #include "steam_network_message.hpp"
 #include "logger.hpp"
 #include <cmath>
+#include <cinttypes>
 
 void GCNetwork_Matchmaking::HandleMatchmakingClient2GCHello(SNetSocket_t p2psocket, void* message, 
                                                            uint32_t msgsize, uint64_t steamId, 
@@ -362,7 +363,7 @@ void GCNetwork_Matchmaking::UpdatePlayerStats(uint64_t steamId, bool won, uint32
     char query[512];
     snprintf(query, sizeof(query),
             "INSERT INTO player_stats (steamid64, matches_played, matches_won, total_kills, total_deaths, total_mvps) "
-            "VALUES (%llu, 1, %d, %u, %u, %u) "
+            "VALUES (" PRIu64 ", 1, %d, %u, %u, %u) "
             "ON DUPLICATE KEY UPDATE "
             "matches_played = matches_played + 1, "
             "matches_won = matches_won + %d, "

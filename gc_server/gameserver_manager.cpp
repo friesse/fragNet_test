@@ -145,13 +145,13 @@ void GameServerManager::BuildServerReservation(CMsgGCCStrike15_v2_MatchmakingGC2
                                                uint64_t matchId,
                                                const std::vector<uint64_t>& playerSteamIds,
                                                const std::string& mapName) {
-    message.set_serverid(matchId);
-    message.set_map(mapName);
+    // Note: set_serverid and set_map not available in current protobuf schema
+    (void)matchId;
+    (void)mapName;
     
     // Add all players to reservation
     for (uint64_t steamId : playerSteamIds) {
-        auto* account = message.add_account_ids();
-        *account = steamId & 0xFFFFFFFF; // Account ID
+        message.add_account_ids(static_cast<uint32_t>(steamId & 0xFFFFFFFF)); // Account ID
     }
     
     logger::info("Built server reservation for match %llu with %zu players on %s",

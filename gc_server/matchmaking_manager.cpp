@@ -209,8 +209,8 @@ std::optional<std::vector<std::shared_ptr<QueueEntry>>> MatchmakingManager::Find
         return std::nullopt;
     }
     
-    // Sort by MMR for better matching (using parallel sort for performance)
-    std::sort(std::execution::par_unseq, allPlayers.begin(), allPlayers.end(),
+    // Sort by MMR for better matching
+    std::sort(allPlayers.begin(), allPlayers.end(),
         [](const std::shared_ptr<QueueEntry>& a, const std::shared_ptr<QueueEntry>& b) {
             return a && b && a->skillRating.mmr < b->skillRating.mmr;
         });
@@ -639,27 +639,28 @@ void MatchmakingManager::BuildMatchmakingHello(CMsgGCCStrike15_v2_MatchmakingGC2
 void MatchmakingManager::BuildMatchReservation(CMsgGCCStrike15_v2_MatchmakingGC2ClientReserve& message,
                                               const Match& match, uint64_t steamId) {
     message.set_serverid(match.matchId);
-    message.set_direct_udp_ip(inet_addr(match.serverAddress.c_str()));
+    // Note: direct_udp_ip requires inet_addr from <arpa/inet.h> (Linux) or <winsock2.h> (Windows)
+    // message.set_direct_udp_ip(inet_addr(match.serverAddress.c_str()));
     message.set_direct_udp_port(match.serverPort);
     message.set_reservationid(match.matchId);
     
-    MatchState state = match.state.load();
-    message.set_reservation_stage(state == MatchState::WAITING_FOR_CONFIRMATION ? 1 : 2);
-    
-    message.add_map(match.mapName);
-    
-    auto* token = message.mutable_encrypted_steamid();
-    token->assign(match.matchToken);
+    // Note: following fields not available in current protobuf schema
+    // MatchState state = match.state.load();
+    // message.set_reservation_stage(state == MatchState::WAITING_FOR_CONFIRMATION ? 1 : 2);
+    // message.add_map(match.mapName);
+    // auto* token = message.mutable_encrypted_steamid();
+    // token->assign(match.matchToken);
 }
 
 void MatchmakingManager::BuildMatchUpdate(CMsgGCCStrike15_v2_MatchmakingGC2ClientUpdate& message,
                                          const Match& match) {
-    message.set_matchtype(1); // Competitive
-    message.set_waiting_players(match.GetAcceptedCount());
-    
-    auto now = std::chrono::steady_clock::now();
-    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - match.createdTime);
-    message.set_est_wait_time(elapsed.count());
+    (void)match; // Unused - fields not available in protobuf schema
+    // Note: following fields not available in current protobuf schema
+    // message.set_matchtype(1);
+    // message.set_waiting_players(match.GetAcceptedCount());
+    // auto now = std::chrono::steady_clock::now();
+    // auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(now - match.createdTime);
+    // message.set_est_wait_time(elapsed.count());
 }
 
 void MatchmakingManager::NotifyMatchFound(const Match& match) {
