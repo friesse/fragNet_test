@@ -1411,7 +1411,7 @@ bool GCNetwork_Inventory::HandleUnboxCrate(
         logger::warning("HandleUnboxCrate: Failed to delete crate from database: %s", mysql_error(inventory_db));
     }
     
-    logger::info("HandleUnboxCrate: Skipping destroy messages - test client shows they're not needed");
+    logger::info("HandleUnboxCrate: No destroy messages sent (matching test client behavior)");
 
     delete crateItem;
     logger::info("HandleUnboxCrate: Successfully unboxed crate %llu for player %llu, got item %llu",
