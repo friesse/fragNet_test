@@ -67,6 +67,7 @@ public:
     static bool HandleUnboxCrate(SNetSocket_t p2psocket, uint64_t steamId, uint64_t crateItemId, MYSQL *inventory_db);
     static uint64_t SaveNewItemToDatabase(const CSOEconItem &item, uint64_t steamId, MYSQL *inventory_db, bool isBaseWeapon = false);
     static bool GetWeaponInfo(uint32_t defIndex, std::string &weaponName, std::string &weaponId);
+    static uint32_t GetNextInventoryPosition(uint64_t steamId, MYSQL *inventory_db);
 
     // Equipping and unequipping
     static bool EquipItem(SNetSocket_t p2psocket, uint64_t steamId, uint64_t itemId, uint32_t classId, uint32_t slotId, MYSQL *inventory_db);

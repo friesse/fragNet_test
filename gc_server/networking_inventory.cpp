@@ -1245,6 +1245,57 @@ int GCNetwork_Inventory::ProcessClientAcknowledgment(
 }
 
 /**
+ * Gets the next available inventory position for a new item
+ *
+ * @param steamId The steam ID of the player
+ * @param inventory_db Database connection
+ * @return The next available inventory position (skips position 1 for nametag)
+ */
+uint32_t GCNetwork_Inventory::GetNextInventoryPosition(uint64_t steamId, MYSQL *inventory_db)
+{
+    if (!inventory_db)
+    {
+        logger::error("GetNextInventoryPosition: Database connection is null");
+        return 2; // Default to position 2 if we can't query
+    }
+
+    char query[256];
+    snprintf(query, sizeof(query),
+             "SELECT COALESCE(MAX(acknowledged), 1) FROM csgo_items WHERE owner_steamid2 = '%s'",
+             GCNetwork_Users::SteamID64ToSteamID2(steamId).c_str());
+
+    if (mysql_query(inventory_db, query) != 0)
+    {
+        logger::error("GetNextInventoryPosition: MySQL query failed: %s", mysql_error(inventory_db));
+        return 2;
+    }
+
+    MYSQL_RES *result = mysql_store_result(inventory_db);
+    if (!result)
+    {
+        logger::error("GetNextInventoryPosition: Failed to store MySQL result");
+        return 2;
+    }
+
+    uint32_t nextPosition = 2; // Start at 2 (position 1 is reserved for nametag)
+    MYSQL_ROW row = mysql_fetch_row(result);
+
+    if (row && row[0])
+    {
+        nextPosition = atoi(row[0]) + 1;
+        if (nextPosition == 1)
+            nextPosition = 2; // Skip position 1
+    }
+
+    mysql_free_result(result);
+
+    logger::info("GetNextInventoryPosition: Next available position for user %llu is %u",
+                 steamId, nextPosition);
+
+    return nextPosition;
+}
+
+/**
  * Handles the unboxing of a crate, generating a new item and saving it to the database
  *
  * @param p2psocket The socket to send updates to
@@ -1284,7 +1335,10 @@ bool GCNetwork_Inventory::HandleUnboxCrate(
     }
 
     newItem.set_account_id(steamId & 0xFFFFFFFF);
-    newItem.set_inventory(0);
+    
+    // Get next available inventory position for immediate display
+    uint32_t inventoryPosition = GetNextInventoryPosition(steamId, inventory_db);
+    newItem.set_inventory(inventoryPosition);
 
     uint64_t newItemId = SaveNewItemToDatabase(newItem, steamId, inventory_db);
     if (newItemId == 0)
@@ -1292,6 +1346,17 @@ bool GCNetwork_Inventory::HandleUnboxCrate(
         logger::error("HandleUnboxCrate: Failed to save new item to database");
         delete crateItem;
         return false;
+    }
+
+    // Update the database with the inventory position
+    char updatePosQuery[256];
+    snprintf(updatePosQuery, sizeof(updatePosQuery),
+             "UPDATE csgo_items SET acknowledged = %u WHERE id = %llu",
+             inventoryPosition, newItemId);
+    
+    if (mysql_query(inventory_db, updatePosQuery) != 0)
+    {
+        logger::warning("HandleUnboxCrate: Failed to update inventory position: %s", mysql_error(inventory_db));
     }
 
     // setting id to newest
