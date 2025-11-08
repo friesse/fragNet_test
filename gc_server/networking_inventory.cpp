@@ -968,10 +968,21 @@ bool GCNetwork_Inventory::CheckAndSendNewItemsSince(
 
             if (isFromCrate)
             {
-                // If the item was from a crate opening, only send it as UnlockCrateResponse
-                logger::info("CheckAndSendNewItemsSince: Item has acquired_by='0', sending UnlockCrateResponse for item %llu", item->id());
-                updateSuccess = SendSOSingleObject(p2psocket, steamId, SOTypeItem, *item, k_EMsgGC_CC_GC2CL_UnlockCrateResponse);
-                //updateSuccess = true;
+                // Item from crate opening - skip sending it here since it was already sent in HandleUnboxCrate
+                logger::info("CheckAndSendNewItemsSince: Skipping item %llu with acquired_by='0' (already sent as UnlockCrateResponse)", item->id());
+                
+                // Update the acquired_by field to "crate" to prevent sending it again
+                char updateQuery[256];
+                snprintf(updateQuery, sizeof(updateQuery),
+                         "UPDATE csgo_items SET acquired_by = 'crate' WHERE id = %llu",
+                         item->id());
+                
+                if (mysql_query(inventory_db, updateQuery) != 0)
+                {
+                    logger::error("CheckAndSendNewItemsSince: Failed to update acquired_by field: %s", mysql_error(inventory_db));
+                }
+                
+                updateSuccess = true;  // Mark as success even though we didn't send anything
             }
             else
             {
@@ -1292,12 +1303,16 @@ bool GCNetwork_Inventory::HandleUnboxCrate(
         logger::warning("HandleUnboxCrate: Failed to delete crate %llu after opening", crateItemId);
     }
 
-    // this shit is fucked
-    /*bool success = SendSOSingleObject(p2psocket, steamId, SOTypeItem, newItem, k_EMsgGC_CC_GC2CL_UnlockCrateResponse);
+    // Send the UnlockCrateResponse immediately
+    bool success = SendSOSingleObject(p2psocket, steamId, SOTypeItem, newItem, k_EMsgGC_CC_GC2CL_UnlockCrateResponse);
     if (!success)
     {
         logger::error("HandleUnboxCrate: Failed to send unlock notification to client");
-    }*/
+    }
+    else
+    {
+        logger::info("HandleUnboxCrate: Sent UnlockCrateResponse for item %llu", newItemId);
+    }
 
     delete crateItem;
     logger::info("HandleUnboxCrate: Successfully unboxed crate %llu for player %llu, got item %llu",
