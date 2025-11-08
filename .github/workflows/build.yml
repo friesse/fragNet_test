@@ -51,6 +51,8 @@ jobs:
     - if: matrix.os == 'ubuntu-latest'
       name: Configure CMake (Linux)
       run: |
+        # Force clean build - remove any cached build directory
+        rm -rf ${{ github.workspace }}/build
         mkdir -p ${{ github.workspace }}/build
         mkdir -p ${{ github.workspace }}/release
         cd ${{ github.workspace }}/build
@@ -107,7 +109,10 @@ jobs:
     # Windows Build
     - if: matrix.os == 'windows-latest'
       name: Build Windows
+      shell: bash
       run: |
+        # Force clean build - remove any cached build directory
+        rm -rf ${{ github.workspace }}/build
         mkdir ${{ github.workspace }}/build
         mkdir ${{ github.workspace }}/release
         cd ${{ github.workspace }}/build

@@ -10,6 +10,9 @@ constexpr uint64_t InventoryVersion = 2000336; // is this correct? taken from Cl
 // Client Version
 constexpr uint64_t ClientVersion = 102;
 
+// Build timestamp - forces recompilation
+constexpr const char* BUILD_TIMESTAMP = __DATE__ " " __TIME__;
+
 // CMsgSOIDOwner type
 enum SoIdType
 {
