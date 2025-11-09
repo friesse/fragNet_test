@@ -1373,32 +1373,58 @@ bool GCNetwork_Inventory::HandleUnboxCrate(
     // setting id to newest
     newItem.set_id(newItemId);
 
-    // Match the EXACT old server sequence that gave 5-second spin:
-    // 1. Delete crate notification (1063)
-    // 2. CC UnlockCrateResponse (1061)
+    // MATCH WORKING LOCAL CLIENT EXACTLY:
+    // 1. k_ESOMsg_Destroy (crate) - type 23 | ProtobufMask
+    // 2. k_ESOMsg_Create (new item) - type 21 | ProtobufMask  
+    // 3. k_EMsgGCUnlockCrateResponse (1008) - NOT 1061!
     
-    // Delete crate and send notification (matching old server)
-    if (!DeleteItem(crateItemId, steamId, p2psocket, inventory_db))
+    // Step 1: Send k_ESOMsg_Destroy for the crate
+    uint32_t destroyMsg = k_ESOMsg_Destroy | ProtobufMask;
+    bool destroySuccess = SendSOSingleObject(p2psocket, steamId, SOTypeItem, *crateItem, destroyMsg);
+    if (!destroySuccess)
     {
-        logger::warning("HandleUnboxCrate: Failed to delete crate %llu", crateItemId);
+        logger::error("HandleUnboxCrate: Failed to send crate destroy");
     }
     else
     {
-        logger::info("HandleUnboxCrate: Deleted crate %llu and sent delete notification (1063)", crateItemId);
+        logger::info("HandleUnboxCrate: Sent k_ESOMsg_Destroy for crate %llu", crateItemId);
     }
     
-    // Now send the CC UnlockCrateResponse (1061) with the new item
-    bool unlockSuccess = SendSOSingleObject(p2psocket, steamId, SOTypeItem, newItem, k_EMsgGC_CC_GC2CL_UnlockCrateResponse);
+    // Step 2: Send k_ESOMsg_Create for the new item
+    uint32_t createMsg = k_ESOMsg_Create | ProtobufMask;
+    bool createSuccess = SendSOSingleObject(p2psocket, steamId, SOTypeItem, newItem, createMsg);
+    if (!createSuccess)
+    {
+        logger::error("HandleUnboxCrate: Failed to send item creation");
+    }
+    else
+    {
+        logger::info("HandleUnboxCrate: Sent k_ESOMsg_Create for item %llu", newItemId);
+    }
+    
+    // Step 3: Send k_EMsgGCUnlockCrateResponse (1008) - STANDARD, not CC!
+    bool unlockSuccess = SendSOSingleObject(p2psocket, steamId, SOTypeItem, newItem, k_EMsgGCUnlockCrateResponse);
     if (!unlockSuccess)
     {
-        logger::error("HandleUnboxCrate: Failed to send unlock response to client");
+        logger::error("HandleUnboxCrate: Failed to send unlock response");
     }
     else
     {
-        logger::info("HandleUnboxCrate: Sent CC UnlockCrateResponse (1061) for item %llu", newItemId);
+        logger::info("HandleUnboxCrate: Sent k_EMsgGCUnlockCrateResponse (1008) for item %llu", newItemId);
     }
     
-    logger::info("HandleUnboxCrate: Used exact old sequence - Delete(1063) then Response(1061) [BUILD:v5.0]");
+    // Now delete from database
+    char deleteQuery[256];
+    snprintf(deleteQuery, sizeof(deleteQuery),
+             "DELETE FROM csgo_items WHERE id = %llu AND owner_steamid2 = '%s'",
+             crateItemId, GCNetwork_Users::SteamID64ToSteamID2(steamId).c_str());
+    
+    if (mysql_query(inventory_db, deleteQuery) != 0)
+    {
+        logger::warning("HandleUnboxCrate: Failed to delete crate from database: %s", mysql_error(inventory_db));
+    }
+    
+    logger::info("HandleUnboxCrate: EXACT LOCAL CLIENT SEQUENCE - Destroy→Create→Response(1008) [BUILD:v6.0]");
 
     delete crateItem;
     logger::info("HandleUnboxCrate: Successfully unboxed crate %llu for player %llu, got item %llu",
