@@ -113,6 +113,15 @@ jobs:
         echo "Found binary at: $BIN"
         cp "$BIN" "${{ github.workspace }}/release/gc_server/"
         
+        # Copy Steam API library (64-bit for Linux)
+        STEAM_LIB="${{ github.workspace }}/steamworks/sdk/redistributable_bin/linux64/libsteam_api.so"
+        if [ -f "$STEAM_LIB" ]; then
+            echo "Copying Steam API library..."
+            cp -v "$STEAM_LIB" "${{ github.workspace }}/release/gc_server/"
+        else
+            echo "WARNING: Steam API library not found at $STEAM_LIB"
+        fi
+        
         # Copy additional files
         cp -v "${{ github.workspace }}/README.md" "${{ github.workspace }}/release/" || echo "README.md not found, skipping"
         cp -v "${{ github.workspace }}/QUICK_START.md" "${{ github.workspace }}/release/" || echo "QUICK_START.md not found, skipping"

@@ -1373,22 +1373,10 @@ bool GCNetwork_Inventory::HandleUnboxCrate(
     // setting id to newest
     newItem.set_id(newItemId);
 
-    // Based on test client analysis: DON'T send destroy messages!
-    // The working test client has DESTORY_USED_ITEMS disabled, meaning it only creates items, doesn't destroy
+    // Try simpler approach: Just send UnlockCrateResponse with the new item
+    // Don't send any ESO messages - the response itself contains the item data
     
-    // 1. Send item creation (k_ESOMsg_Create = 21)  
-    uint32_t createMsg = k_ESOMsg_Create | ProtobufMask;
-    bool createSuccess = SendSOSingleObject(p2psocket, steamId, SOTypeItem, newItem, createMsg);
-    if (!createSuccess)
-    {
-        logger::error("HandleUnboxCrate: Failed to send item creation");
-    }
-    else
-    {
-        logger::info("HandleUnboxCrate: Sent item creation (ESOMsg_Create) for item %llu", newItemId);
-    }
-    
-    // 2. Send the UnlockCrateResponse for the animation completion
+    // Send the UnlockCrateResponse for the animation completion
     // CRITICAL: Must use k_EMsgGCUnlockCrateResponse (1008), NOT k_EMsgGC_CC_GC2CL_UnlockCrateResponse (1061)!
     bool unlockSuccess = SendSOSingleObject(p2psocket, steamId, SOTypeItem, newItem, k_EMsgGCUnlockCrateResponse);
     if (!unlockSuccess)
@@ -1400,7 +1388,7 @@ bool GCNetwork_Inventory::HandleUnboxCrate(
         logger::info("HandleUnboxCrate: Sent UnlockCrateResponse (1008) for item %llu", newItemId);
     }
     
-    // Now actually delete the crate from database (but don't send destroy message)
+    // Delete the crate from database
     char deleteQuery[256];
     snprintf(deleteQuery, sizeof(deleteQuery),
              "DELETE FROM csgo_items WHERE id = %llu AND owner_steamid2 = '%s'",
@@ -1411,7 +1399,7 @@ bool GCNetwork_Inventory::HandleUnboxCrate(
         logger::warning("HandleUnboxCrate: Failed to delete crate from database: %s", mysql_error(inventory_db));
     }
     
-    logger::info("HandleUnboxCrate: No destroy messages sent (matching test client behavior) [BUILD:v2.0]");
+    logger::info("HandleUnboxCrate: Sent ONLY UnlockCrateResponse (1008) - no ESO messages [BUILD:v3.0]");
 
     delete crateItem;
     logger::info("HandleUnboxCrate: Successfully unboxed crate %llu for player %llu, got item %llu",

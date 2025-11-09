@@ -83,6 +83,17 @@ fi
 # Set Steam App ID
 export SteamAppId=730
 echo -e "${GREEN}✓ Set SteamAppId=730 (CS:GO)${NC}"
+
+# Set library path for Steam API (64-bit)
+if [ -d "$SCRIPT_DIR/steamworks/sdk/redistributable_bin/linux64" ]; then
+    export LD_LIBRARY_PATH="$SCRIPT_DIR/steamworks/sdk/redistributable_bin/linux64:$LD_LIBRARY_PATH"
+    echo -e "${GREEN}✓ Set LD_LIBRARY_PATH for 64-bit Steam API${NC}"
+elif [ -d "$SCRIPT_DIR/steamworks/sdk/redistributable_bin/linux32" ]; then
+    export LD_LIBRARY_PATH="$SCRIPT_DIR/steamworks/sdk/redistributable_bin/linux32:$LD_LIBRARY_PATH"
+    echo -e "${GREEN}✓ Set LD_LIBRARY_PATH for 32-bit Steam API${NC}"
+else
+    echo -e "${YELLOW}⚠ Steam API library path not found - may have runtime issues${NC}"
+fi
 echo ""
 
 # Create logs directory if it doesn't exist
