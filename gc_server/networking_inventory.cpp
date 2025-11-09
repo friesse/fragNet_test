@@ -1373,10 +1373,21 @@ bool GCNetwork_Inventory::HandleUnboxCrate(
     // setting id to newest
     newItem.set_id(newItemId);
 
-    // Actually, maybe we DO need the CC version after all!
-    // The old server that "worked" (5 second spin) was using 1061, not 1008
+    // Match the EXACT old server sequence that gave 5-second spin:
+    // 1. Delete crate notification (1063)
+    // 2. CC UnlockCrateResponse (1061)
     
-    // Send the CC UnlockCrateResponse (1061) - this is what the old server used
+    // Delete crate and send notification (matching old server)
+    if (!DeleteItem(crateItemId, steamId, p2psocket, inventory_db))
+    {
+        logger::warning("HandleUnboxCrate: Failed to delete crate %llu", crateItemId);
+    }
+    else
+    {
+        logger::info("HandleUnboxCrate: Deleted crate %llu and sent delete notification (1063)", crateItemId);
+    }
+    
+    // Now send the CC UnlockCrateResponse (1061) with the new item
     bool unlockSuccess = SendSOSingleObject(p2psocket, steamId, SOTypeItem, newItem, k_EMsgGC_CC_GC2CL_UnlockCrateResponse);
     if (!unlockSuccess)
     {
@@ -1387,18 +1398,7 @@ bool GCNetwork_Inventory::HandleUnboxCrate(
         logger::info("HandleUnboxCrate: Sent CC UnlockCrateResponse (1061) for item %llu", newItemId);
     }
     
-    // Delete the crate from database
-    char deleteQuery[256];
-    snprintf(deleteQuery, sizeof(deleteQuery),
-             "DELETE FROM csgo_items WHERE id = %llu AND owner_steamid2 = '%s'",
-             crateItemId, GCNetwork_Users::SteamID64ToSteamID2(steamId).c_str());
-    
-    if (mysql_query(inventory_db, deleteQuery) != 0)
-    {
-        logger::warning("HandleUnboxCrate: Failed to delete crate from database: %s", mysql_error(inventory_db));
-    }
-    
-    logger::info("HandleUnboxCrate: Sent ONLY CC UnlockCrateResponse (1061) - no other messages [BUILD:v4.0]");
+    logger::info("HandleUnboxCrate: Used exact old sequence - Delete(1063) then Response(1061) [BUILD:v5.0]");
 
     delete crateItem;
     logger::info("HandleUnboxCrate: Successfully unboxed crate %llu for player %llu, got item %llu",
