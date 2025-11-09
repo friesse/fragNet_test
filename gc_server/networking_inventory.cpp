@@ -1373,19 +1373,18 @@ bool GCNetwork_Inventory::HandleUnboxCrate(
     // setting id to newest
     newItem.set_id(newItemId);
 
-    // Try simpler approach: Just send UnlockCrateResponse with the new item
-    // Don't send any ESO messages - the response itself contains the item data
+    // Actually, maybe we DO need the CC version after all!
+    // The old server that "worked" (5 second spin) was using 1061, not 1008
     
-    // Send the UnlockCrateResponse for the animation completion
-    // CRITICAL: Must use k_EMsgGCUnlockCrateResponse (1008), NOT k_EMsgGC_CC_GC2CL_UnlockCrateResponse (1061)!
-    bool unlockSuccess = SendSOSingleObject(p2psocket, steamId, SOTypeItem, newItem, k_EMsgGCUnlockCrateResponse);
+    // Send the CC UnlockCrateResponse (1061) - this is what the old server used
+    bool unlockSuccess = SendSOSingleObject(p2psocket, steamId, SOTypeItem, newItem, k_EMsgGC_CC_GC2CL_UnlockCrateResponse);
     if (!unlockSuccess)
     {
         logger::error("HandleUnboxCrate: Failed to send unlock response to client");
     }
     else
     {
-        logger::info("HandleUnboxCrate: Sent UnlockCrateResponse (1008) for item %llu", newItemId);
+        logger::info("HandleUnboxCrate: Sent CC UnlockCrateResponse (1061) for item %llu", newItemId);
     }
     
     // Delete the crate from database
@@ -1399,7 +1398,7 @@ bool GCNetwork_Inventory::HandleUnboxCrate(
         logger::warning("HandleUnboxCrate: Failed to delete crate from database: %s", mysql_error(inventory_db));
     }
     
-    logger::info("HandleUnboxCrate: Sent ONLY UnlockCrateResponse (1008) - no ESO messages [BUILD:v3.0]");
+    logger::info("HandleUnboxCrate: Sent ONLY CC UnlockCrateResponse (1061) - no other messages [BUILD:v4.0]");
 
     delete crateItem;
     logger::info("HandleUnboxCrate: Successfully unboxed crate %llu for player %llu, got item %llu",
