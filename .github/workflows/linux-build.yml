@@ -1,0 +1,54 @@
+# this workflow is for building the project on linux
+# it's probably held together with digital duct tape and prayers, but hey, if it works, it works
+
+name: linux build
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: checkout repository
+      uses: actions/checkout@v4
+
+    - name: install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          pkg-config \
+          libmariadb-dev \
+          libmariadb-dev-compat \
+          libcrypto++-dev \
+          libprotobuf-dev \
+          protobuf-compiler \
+          libssl-dev \
+          zlib1g-dev
+        # hopefully this doesn't summon any demons
+
+    - name: configure cmake
+      run: |
+        mkdir -p build
+        cd build
+        cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_STANDARD=17
+        # letting cmake cook, hope it doesn't burn the house down
+
+    - name: build project
+      run: |
+        cd build
+        make -j$(nproc)
+        # if this works, i'm a genius. if not, blame cosmic rays.
+
+    - name: upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: gc-server-linux
+        path: build/gc_server/gc-server_linux64
+        # here's your build, hot and fresh. don't drop it.
