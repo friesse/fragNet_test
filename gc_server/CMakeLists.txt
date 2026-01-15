@@ -5,6 +5,8 @@ add_executable(gc-server WIN32
     networking.cpp
     networking_users.cpp
     networking_inventory.cpp
+    networking_inventory_actions.cpp
+    networking_inventory_transactions.cpp
     networking_matchmaking.cpp
     gc_message.cpp
     steam_network_message.cpp
