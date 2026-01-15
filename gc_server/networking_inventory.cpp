@@ -1727,7 +1727,6 @@ int GCNetwork_Inventory::ProcessClientAcknowledgment(
   }
 
   auto &stmt = *stmtOpt;
-  unsigned long steamIdLen = steamId2.length();
 
   // loop over all items to acknowledge
   for (int i = 0; i < message.item_id_size(); i++) {

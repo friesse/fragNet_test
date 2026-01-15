@@ -4,10 +4,9 @@
 #include "safe_parse.hpp"
 #include "stdafx.h"
 
-#include <dlfcn.h>
-#define STEAM_API_EXPORTS
 #include <cstdlib> // for getenv, atoi
 #include <cstring>
+#include <dlfcn.h>
 #include <steam/steam_gameserver.h>
 
 // Configuration - Can be overridden by environment variables GC_BIND_IP and

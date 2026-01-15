@@ -120,6 +120,14 @@ public:
   }
 
   /**
+   * Bind a NULL parameter at the given index (0-based).
+   */
+  void bindNull(size_t index) {
+    validateIndex(index);
+    m_binds[index].buffer_type = MYSQL_TYPE_NULL;
+  }
+
+  /**
    * Execute the prepared statement.
    * @return true on success, false on failure
    */
