@@ -1,189 +1,148 @@
-cmake_minimum_required(VERSION 3.20)
-
 project(gc-server)
 
-set(CMAKE_CXX_STANDARD 20)
+add_executable(gc-server WIN32
+    main.cpp
+    networking.cpp
+    networking_users.cpp
+    networking_inventory.cpp
+    networking_inventory_actions.cpp
+    networking_inventory_transactions.cpp
+    networking_matchmaking.cpp
+    gc_message.cpp
+    steam_network_message.cpp
+    logger.cpp
+    tcp_networking.cpp
+    
+    inventory.cpp
+    item_schema.cpp
+    keyvalue.cpp
+    keyvalue_english.cpp
+    random.cpp
+    
+    # Matchmaking system
+    matchmaking_manager.cpp
+    production_matchmaking.cpp
+    mysql_database.cpp
+    gameserver_manager.cpp)
 
-if (CMAKE_SIZEOF_VOID_P EQUAL 4)
-    set(IS_32BIT ON)
+target_precompile_headers(gc-server PRIVATE stdafx.h)
+set_target_properties(gc-server PROPERTIES PREFIX "")
+set_target_properties(gc-server PROPERTIES OUTPUT_NAME gc-server${GC_EXE_SUFFIX})
+if(UNIX AND NOT APPLE)
+    set_target_properties(gc-server PROPERTIES POSITION_INDEPENDENT_CODE ON)
 endif()
 
-if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
-    if (IS_32BIT)
-        set(GC_LIB_DIR ".")
-        set(GC_EXE_SUFFIX "_osx")
-    else()
-        set(GC_LIB_DIR "osx64")
-        set(GC_EXE_SUFFIX "_osx64")
-    endif()
-elseif (CMAKE_SYSTEM_NAME STREQUAL "Linux")
-    if (IS_32BIT)
-        set(GC_LIB_DIR ".")
-        set(GC_EXE_SUFFIX "_linux")
-    else()
-        set(GC_LIB_DIR "linux64")
-        set(GC_LIB_SUFFIX "_client")
-        set(GC_EXE_SUFFIX "_linux64")
-    endif()
-elseif (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    if (IS_32BIT)
-        set(GC_LIB_DIR ".")
-    else()
-        set(GC_LIB_DIR "x64")
-        set(GC_EXE_SUFFIX "_win64")
-    endif()
-else()
-    message(FATAL_ERROR "Unsupported system $[CMAKE_SYSTEM_NAME}")
-endif()
-
+# Only set subsystem and Windows-specific options for MSVC
 if (MSVC)
-    # statically linked crt
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_link_options(gc-server PRIVATE /SUBSYSTEM:CONSOLE)
+    target_compile_options(gc-server PRIVATE /W4 /wd4244)
+    target_compile_definitions(gc-server PRIVATE *CRT*SECURE_NO_WARNINGS)
+endif()
+
+file(GLOB PROTOBUFS ../protobufs/*.cc)
+
+if(IS_32BIT)
+    set(MARIADB_LIBRARY "/usr/lib/i386-linux-gnu/libmariadb.a")
+endif()
+
+target_include_directories(gc-server PRIVATE
+    ${protobuf_SOURCE_DIR}/src
+    ../protobufs
+    ${MARIADB_INCLUDE_DIRS}
+    ${MARIADB_INCLUDE_DIR} # for windows
+)
+
+target_sources(gc-server PRIVATE ${PROTOBUFS})
+source_group("Protobufs" FILES ${PROTOBUFS})
+
+target_link_libraries(gc-server PRIVATE
+    protobuf::libprotobuf
+    steam_api
+    ${MARIADB_LIBRARIES}
+    ${MARIADB_LIBRARY}
+)
+
+# Link cryptopp (from system, vcpkg, or FetchContent)
+message(STATUS "Searching for cryptopp library...")
+
+# First check if we have the target from the main CMakeLists
+if(TARGET cryptopp::cryptopp)
+    message(STATUS "Linking cryptopp::cryptopp")
+    target_link_libraries(gc-server PRIVATE cryptopp::cryptopp)
+elseif(TARGET cryptopp)
+    message(STATUS "Linking cryptopp target")
+    target_link_libraries(gc-server PRIVATE cryptopp)
+elseif(TARGET cryptopp-static)
+    message(STATUS "Linking cryptopp-static")
+    target_link_libraries(gc-server PRIVATE cryptopp-static)
 else()
-    add_compile_options(-fpic -fvisibility=hidden)
-
-    if (NOT APPLE)
-        add_link_options(-Wl,--no-undefined)
-    endif()
-endif()
-
-include(FetchContent)
-set(FETCHCONTENT_QUIET FALSE)
-
-#-------------------------------------------------
-# cryptopp-cmake
-#-------------------------------------------------
-set(CRYPTOPP_BUILD_TESTING OFF CACHE BOOL "Disable cryptopp tests")
-set(CRYPTOPP_INSTALL OFF CACHE BOOL "Disable cryptopp installation")
-
-# First try to find system cryptopp
-find_package(PkgConfig QUIET)
-if(PkgConfig_FOUND)
-    pkg_check_modules(CRYPTOPP QUIET libcrypto++)
-    if(CRYPTOPP_FOUND)
-        message(STATUS "Found system cryptopp: ${CRYPTOPP_VERSION}")
-        add_library(cryptopp::cryptopp INTERFACE IMPORTED)
-        set_target_properties(cryptopp::cryptopp PROPERTIES
-            INTERFACE_INCLUDE_DIRECTORIES "${CRYPTOPP_INCLUDE_DIRS}"
-            INTERFACE_LINK_LIBRARIES "${CRYPTOPP_LIBRARIES}"
-        )
-        message(STATUS "Created cryptopp::cryptopp target from system installation")
-    endif()
-endif()
-
-# If system package not found, use FetchContent
-if(NOT TARGET cryptopp::cryptopp)
-    message(STATUS "System cryptopp not found, using FetchContent")
+    # Try to find cryptopp using find_package as a last resort
+    message(STATUS "Trying to find cryptopp using find_package...")
+    find_package(cryptopp QUIET)
     
-    # Clear any previous cryptopp variables
-    unset(CRYPTOPP_FOUND CACHE)
-    unset(CRYPTOPP_INCLUDE_DIR CACHE)
-    unset(CRYPTOPP_LIBRARIES CACHE)
-    
-    # Use FetchContent to get cryptopp-cmake
-    include(FetchContent)
-    FetchContent_Declare(
-        cryptopp-cmake
-        GIT_REPOSITORY https://github.com/abdes/cryptopp-cmake.git
-        GIT_TAG master
-        GIT_SHALLOW TRUE
-    )
-    
-    # Prevent cryptopp-cmake from building tests and examples
-    set(CRYPTOPP_BUILD_TESTING OFF CACHE BOOL "" FORCE)
-    set(CRYPTOPP_INSTALL OFF CACHE BOOL "" FORCE)
-    set(CRYPTOPP_BUILD_DOCUMENTATION OFF CACHE BOOL "" FORCE)
-    
-    # Make cryptopp-cmake available
-    FetchContent_MakeAvailable(cryptopp-cmake)
-    
-    if(NOT TARGET cryptopp::cryptopp)
-        message(STATUS "cryptopp::cryptopp target still not found, trying to create it manually")
-        if(TARGET cryptopp)
-            add_library(cryptopp::cryptopp ALIAS cryptopp)
-            message(STATUS "Created cryptopp::cryptopp alias from cryptopp target")
+    if(TARGET cryptopp::cryptopp)
+        message(STATUS "Found cryptopp::cryptopp via find_package")
+        target_link_libraries(gc-server PRIVATE cryptopp::cryptopp)
+    else()
+        # If we still don't have a target, try to find the library directly
+        find_package(PkgConfig QUIET)
+        if(PkgConfig_FOUND)
+            pkg_check_modules(CRYPTOPP QUIET libcrypto++)
+            if(CRYPTOPP_FOUND)
+                message(STATUS "Found cryptopp via pkg-config: ${CRYPTOPP_LIBRARIES}")
+                target_include_directories(gc-server PRIVATE ${CRYPTOPP_INCLUDE_DIRS})
+                target_link_libraries(gc-server PRIVATE ${CRYPTOPP_LIBRARIES})
+                return()
+            endif()
         endif()
-    endif()
-    
-    if(NOT TARGET cryptopp::cryptopp)
-        message(WARNING "Failed to set up cryptopp::cryptopp target")
+        
+        # If we get here, we couldn't find cryptopp
+        message(STATUS "Available targets in current scope:")
+        get_property(targets DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR} PROPERTY BUILDSYSTEM_TARGETS)
+        foreach(target ${targets})
+            message(STATUS "  - ${target}")
+        endforeach()
+        
+        message(FATAL_ERROR "cryptopp library not found! Please ensure cryptopp is installed or use FetchContent.")
     endif()
 endif()
 
-#-------------------------------------------------
-# mariadb
-#-------------------------------------------------
+# Add include directories if they're not already included
+if(CRYPTOPP_INCLUDE_DIRS)
+    target_include_directories(gc-server PRIVATE ${CRYPTOPP_INCLUDE_DIRS})
+endif()
 
-if (CMAKE_SYSTEM_NAME STREQUAL "Windows")
-    if (IS_32BIT)
-        set(MARIADB_LIB_DIR "${CMAKE_SOURCE_DIR}/mariadb/lib32")
-        set(MARIADB_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/mariadb/include32")
-    else()
-        set(MARIADB_LIB_DIR "${CMAKE_SOURCE_DIR}/mariadb/lib64")
-        set(MARIADB_INCLUDE_DIR "${CMAKE_SOURCE_DIR}/mariadb/include64")
-    endif()
-    find_library(MARIADB_LIBRARY
-        NAMES libmariadb mariadb
-        PATHS ${MARIADB_LIB_DIR}
-        NO_DEFAULT_PATH
+# Platform-specific libraries
+if (MSVC OR WIN32)
+    target_link_libraries(gc-server PRIVATE
+        ws2_32    # Winsock
+        winmm     # Windows multimedia
     )
 else()
-    # linux/macOS
-    if(IS_32BIT)
-        find_library(MARIADB_LIBRARY 
-            NAMES libmariadb.a mariadb
-            PATHS /usr/lib/i386-linux-gnu
-            NO_DEFAULT_PATH
-            REQUIRED
-        )
-        set(MARIADB_INCLUDE_DIRS /usr/include/mariadb)
-    else()
-        find_package(PkgConfig REQUIRED)
-        pkg_check_modules(MARIADB REQUIRED mariadb)
-    endif()
+    # Linux/Unix libraries
+    target_link_libraries(gc-server PRIVATE
+        pthread
+        m
+        dl
+        z
+        ssl
+        crypto
+    )
 endif()
-
-if(NOT MARIADB_LIBRARY AND NOT MARIADB_FOUND)
-    message(FATAL_ERROR "MariaDB not found. Please install libmariadb-dev (Linux) or set up MariaDB libraries manually (Windows)")
+   
+# apple message box
+if (APPLE)
+    target_link_libraries(gc-server PRIVATE "-framework Foundation")
 endif()
-
-#-------------------------------------------------
-# protobuf
-#-------------------------------------------------
-
-option(protobuf_INSTALL "Install protobuf binaries and files" OFF)
-option(protobuf_BUILD_TESTS "Build tests" OFF)
-option(protobuf_BUILD_PROTOC_BINARIES "Build libprotoc and protoc compiler" OFF)
-option(protobuf_BUILD_SHARED_LIBS "Build Shared Libraries" OFF)
-option(protobuf_WITH_ZLIB "Build with zlib support" OFF)
-
-FetchContent_Declare(protobuf GIT_REPOSITORY https://github.com/protocolbuffers/protobuf GIT_TAG 21.x GIT_SHALLOW TRUE)
-FetchContent_MakeAvailable(protobuf)
-
-add_definitions(-DSTEAM_API_EXPORTS)
 
 if (MSVC)
-    # statically linked crt
-    set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
-    
-    # Add Steam SDK path for Windows
-    if (IS_32BIT)
-        set(STEAM_SDK_LIB_PATH "${CMAKE_SOURCE_DIR}/steamworks/sdk/redistributable_bin")
-    else()
-        set(STEAM_SDK_LIB_PATH "${CMAKE_SOURCE_DIR}/steamworks/sdk/redistributable_bin/win64")
-    endif()
-    
-    # Export this variable so subprojects can use it
-    set(STEAM_SDK_LIB_PATH ${STEAM_SDK_LIB_PATH} CACHE PATH "Path to Steam SDK libraries")
-    
-    # Add linker options for Windows
-    add_link_options(/SUBSYSTEM:WINDOWS)
-else()
-    add_compile_options(-fpic -fvisibility=hidden)
-    if (NOT APPLE)
-        add_link_options(-Wl,--no-undefined)
-    endif()
+    # we need large address awareness and a larger stack to not crash
+    target_link_options(gc-server PRIVATE /LARGEADDRESSAWARE /STACK:1572864)
 endif()
 
-add_subdirectory(steamworks)
-add_subdirectory(gc_server)
+if (OUTDIR)
+    add_custom_command(TARGET gc-server POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy
+        $<TARGET_FILE:gc-server>
+        ${OUTDIR}/gc-server/${GC_LIB_DIR}/$<TARGET_FILE_NAME:gc-server>)
+endif()
