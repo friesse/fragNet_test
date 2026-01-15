@@ -12,7 +12,6 @@
 #include <optional>
 #include <string>
 
-
 namespace SafeParse {
 
 /**
@@ -66,6 +65,36 @@ inline std::optional<uint32_t> toUint32(const char *str) {
   }
 
   return static_cast<uint32_t>(result);
+}
+
+/**
+ * Safely parse a string to uint16_t.
+ * Returns std::nullopt if str is null, empty, negative, or not valid for
+ * uint16.
+ */
+inline std::optional<uint16_t> toUint16(const char *str) {
+  if (!str || str[0] == '\0') {
+    return std::nullopt;
+  }
+
+  // Check for negative sign
+  if (str[0] == '-') {
+    return std::nullopt;
+  }
+
+  char *endptr = nullptr;
+  errno = 0;
+  unsigned long result = std::strtoul(str, &endptr, 10);
+
+  // Check for errors
+  if (errno == ERANGE || result > 0xFFFF) {
+    return std::nullopt; // Overflow
+  }
+  if (endptr == str || *endptr != '\0') {
+    return std::nullopt; // No valid conversion or trailing garbage
+  }
+
+  return static_cast<uint16_t>(result);
 }
 
 /**

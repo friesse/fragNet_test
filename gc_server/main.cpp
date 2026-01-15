@@ -19,7 +19,7 @@ const char *get_bind_ip() {
 }
 
 uint16 get_game_port() {
-  const char *env_port = getenv("GC_PORT");
+  const char *env_port = getenv("GAME_PORT");
   return env_port ? SafeParse::toUint16(env_port).value_or(27016) : 27016;
 }
 

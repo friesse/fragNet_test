@@ -1713,7 +1713,23 @@ int GCNetwork_Inventory::ProcessClientAcknowledgment(
     InitMultipleObjectsMessage(updateMsg, steamId);
   }
 
-  // for each item
+  // Prepare the update statement once outside the loop for security and
+  // performance
+  auto stmtOpt = createPreparedStatement(
+      inventory_db, "UPDATE csgo_items SET acknowledged = ? "
+                    "WHERE id = ? AND owner_steamid2 = ? AND (acknowledged = 0 "
+                    "OR acknowledged IS NULL)");
+
+  if (!stmtOpt) {
+    logger::error("ProcessClientAcknowledgment: Failed to prepare statement");
+    mysql_query(inventory_db, "ROLLBACK");
+    return 0;
+  }
+
+  auto &stmt = *stmtOpt;
+  unsigned long steamIdLen = steamId2.length();
+
+  // loop over all items to acknowledge
   for (int i = 0; i < message.item_id_size(); i++) {
     uint64_t itemId = message.item_id(i);
 
@@ -1721,1110 +1737,1070 @@ int GCNetwork_Inventory::ProcessClientAcknowledgment(
     if (next_position == 1)
       next_position = 2; // skip position 1 (cause thats the nametag)
 
-    // Prepare the update statement once outside the loop for security and
-    // performance
-    auto stmtOpt = createPreparedStatement(
-        inventory_db,
-        "UPDATE csgo_items SET acknowledged = ? "
-        "WHERE id = ? AND owner_steamid2 = ? AND (acknowledged = 0 "
-        "OR acknowledged IS NULL)");
-
-    if (!stmtOpt) {
-      logger::error("ProcessClientAcknowledgment: Failed to prepare statement");
-      return 0;
-    }
-
-    auto &stmt = *stmtOpt;
-    std::string steamId2 = GCNetwork_Users::SteamID64ToSteamID2(steamId);
-    unsigned long steamIdLen = steamId2.length();
-
-    for (int i = 0; i < message.item_id_size(); i++) {
-      uint64_t itemId = message.item_id(i);
-
-      next_position++;
-      if (next_position == 1)
-        next_position = 2; // skip position 1 (cause thats the nametag)
-
-      // SQL injection safe: using prepared statement
-      uint32_t posParam = next_position;
-      uint64_t idParam = itemId;
-      uint64_t idParam = itemId;
-      stmt.bindUint32(0, &posParam);
-      stmt.bindUint64(1, &idParam);
-      stmt.bindString(2, steamId2.c_str(), &steamIdLen);
-
-      if (!stmt.execute()) {
-        logger::error(
-            "ProcessClientAcknowledgment: MySQL query failed for item %llu: %s",
-            itemId, stmt.error());
-        continue;
-      }
-
-      if (mysql_affected_rows(inventory_db) == 0) {
-        logger::warning("ProcessClientAcknowledgment: Item %llu not found or "
-                        "already acknowledged",
-                        itemId);
-        next_position--;
-        continue;
-      }
-
-      // acknowledge success
-      successCount++;
-
-      // make item
-      auto item =
-          FetchItemFromDatabase(itemId, steamId, inventory_db, next_position);
-      if (item) {
-        if (isSingleItem) {
-          // For a single item, just store it for later use
-          singleItem = std::move(item);
-        } else {
-          // For multiple items, add to the message
-          AddToMultipleObjectsMessage(updateMsg, SOTypeItem, *item);
-          // unique_ptr automatically deletes item here
-        }
-      }
-    }
-
-    // process
-    if (successCount > 0) {
-      if (mysql_query(inventory_db, "COMMIT") != 0) {
-        logger::error(
-            "ProcessClientAcknowledgment: Failed to commit transaction: %s",
-            mysql_error(inventory_db));
-        mysql_query(inventory_db, "ROLLBACK");
-
-        // Smart pointer cleans up singleItem automatically
-        return 0;
-      }
-
-      if (isSingleItem && singleItem) {
-        // Send single item update
-        logger::info("ProcessClientAcknowledgment: Sending single item update "
-                     "with SOSingleObject for item %llu",
-                     singleItem->id());
-        SendSOSingleObject(p2psocket, steamId, SOTypeItem, *singleItem);
-        // Smart pointer cleans up singleItem automatically
-      } else if (!isSingleItem && updateMsg.objects_modified_size() > 0) {
-        // Send multiple items update
-        logger::info("ProcessClientAcknowledgment: Sending %d modified items "
-                     "with SOMultipleObjects",
-                     updateMsg.objects_modified_size());
-        SendSOMultipleObjects(p2psocket, updateMsg);
-      }
-
-      logger::info("ProcessClientAcknowledgment: Successfully acknowledged %d "
-                   "items for player %llu",
-                   successCount, steamId);
-    } else {
-      mysql_query(inventory_db, "ROLLBACK");
-      logger::warning(
-          "ProcessClientAcknowledgment: No items were acknowledged, "
-          "transaction rolled back");
-
-      // Clean up if we have a single item
-      if (singleItem) {
-        // unique_ptr cleans up singleItem automatically
-      }
-    }
-
-    return successCount;
-  }
-
-  /**
-   * Gets the next available inventory position for a new item
-   *
-   * @param steamId The steam ID of the player
-   * @param inventory_db Database connection
-   * @return The next available inventory position (skips position 1 for
-   * nametag)
-   */
-  uint32_t GCNetwork_Inventory::GetNextInventoryPosition(uint64_t steamId,
-                                                         MYSQL *inventory_db) {
-    if (!inventory_db) {
-      logger::error("GetNextInventoryPosition: Database connection is null");
-      return 2; // Default to position 2 if we can't query
-    }
-
     // SQL injection safe: using prepared statement
-    std::string steamId2 = GCNetwork_Users::SteamID64ToSteamID2(steamId);
-    auto stmtOpt = createPreparedStatement(
-        inventory_db,
-        "SELECT COALESCE(MAX(acknowledged), 1) FROM csgo_items WHERE "
-        "owner_steamid2 = ?");
+    uint32_t posParam = next_position;
+    uint64_t idParam = itemId;
+    stmt.bindUint32(0, &posParam);
+    stmt.bindUint64(1, &idParam);
+    stmt.bindString(2, steamId2.c_str(), &steamIdLen);
 
-    if (!stmtOpt) {
-      logger::error("GetNextInventoryPosition: Failed to prepare statement");
-      return 2;
+    if (!stmt.execute()) {
+      logger::error(
+          "ProcessClientAcknowledgment: MySQL query failed for item %llu: %s",
+          itemId, stmt.error());
+      continue;
     }
 
-    auto &stmt = *stmtOpt;
-    unsigned long steamIdLen = steamId2.length();
-    stmt.bindString(0, steamId2.c_str(), &steamIdLen);
-
-    if (!stmt.execute() || !stmt.storeResult()) {
-      logger::error("GetNextInventoryPosition: MySQL query failed: %s",
-                    stmt.error());
-      return 2;
+    if (mysql_affected_rows(inventory_db) == 0) {
+      logger::warning("ProcessClientAcknowledgment: Item %llu not found or "
+                      "already acknowledged",
+                      itemId);
+      next_position--;
+      continue;
     }
 
-    uint32_t currentMaxPos = 1;
-    MYSQL_BIND resultBind[1];
-    memset(resultBind, 0, sizeof(resultBind));
+    // acknowledge success
+    successCount++;
 
-    resultBind[0].buffer_type = MYSQL_TYPE_LONG;
-    resultBind[0].buffer = &currentMaxPos;
-
-    if (!stmt.bindResult(resultBind) || stmt.fetch() != 0) {
-      // If fetch fails, we'll use the default currentMaxPos = 1
+    // make item for notification
+    auto item =
+        FetchItemFromDatabase(itemId, steamId, inventory_db, next_position);
+    if (item) {
+      if (isSingleItem) {
+        singleItem = std::move(item);
+      } else {
+        AddToMultipleObjectsMessage(updateMsg, SOTypeItem, *item);
+      }
     }
-
-    uint32_t nextPosition = currentMaxPos + 1;
-    if (nextPosition <= 1)
-      nextPosition = 2; // Skip position 1 (reserved for nametag)
-
-    logger::info(
-        "GetNextInventoryPosition: Next available position for user %llu is %u",
-        steamId, nextPosition);
-
-    return nextPosition;
   }
 
-  /**
-   * Handles the unboxing of a crate, generating a new item and saving it to the
-   * database
-   *
-   * @param p2psocket The socket to send updates to
-   * Saves a newly generated item to the database
-   *
-   * @param item The CSOEconItem to save
-   * @param steamId The steam ID of the owner
-   * @param inventory_db Database connection
-   * @param isBaseWeapon Whether this is a base weapon without a skin (default:
-   * false)
-   * @return The ID of the newly created item, or 0 on failure
-   */
-  uint64_t GCNetwork_Inventory::SaveNewItemToDatabase(
-      const CSOEconItem &item, uint64_t steamId, MYSQL *inventory_db,
-      bool isBaseWeapon) {
-    if (!g_itemSchema || !inventory_db) {
+  // process result
+  if (successCount > 0) {
+    if (mysql_query(inventory_db, "COMMIT") != 0) {
       logger::error(
-          "SaveNewItemToDatabase: ItemSchema or database connection is null");
+          "ProcessClientAcknowledgment: Failed to commit transaction: %s",
+          mysql_error(inventory_db));
+      mysql_query(inventory_db, "ROLLBACK");
       return 0;
     }
 
-    // extract item info
-    uint32_t defIndex = item.def_index();
-    uint32_t quality = item.quality();
+    if (isSingleItem && singleItem) {
+      // Send single item update
+      logger::info("ProcessClientAcknowledgment: Sending single item update "
+                   "with SOSingleObject for item %llu",
+                   singleItem->id());
+      SendSOSingleObject(p2psocket, steamId, SOTypeItem, *singleItem);
+    } else if (!isSingleItem && updateMsg.objects_modified_size() > 0) {
+      // Send multiple items update
+      logger::info("ProcessClientAcknowledgment: Sending %d modified items "
+                   "with SOMultipleObjects",
+                   updateMsg.objects_modified_size());
+      SendSOMultipleObjects(p2psocket, updateMsg);
+    }
 
-    // for base weapons use NULL for
-    bool isBaseItem = isBaseWeapon;
-    uint32_t rarity =
-        isBaseItem ? 0 : (item.rarity() > 0 ? item.rarity() - 1 : 0);
+    logger::info("ProcessClientAcknowledgment: Successfully acknowledged %d "
+                 "items for player %llu",
+                 successCount, steamId);
+  } else {
+    mysql_query(inventory_db, "ROLLBACK");
+    logger::warning("ProcessClientAcknowledgment: No items were acknowledged, "
+                    "transaction rolled back");
+  }
 
-    // default, some will get populated later
-    std::string itemIdStr = "";
-    float floatValue = 0.0f;
-    uint32_t paintIndex = 0;
-    uint32_t patternIndex = 0;
-    bool statTrak = false;
-    uint32_t statTrakKills = 0;
-    std::string nameTag = item.has_custom_name() ? item.custom_name() : "";
-    bool tradable = isBaseItem ? false : true; // Set to 0 for base items
-    std::string acquiredBy =
-        isBaseItem ? "default" : "0"; // Set to "default" for base items
+  return successCount;
+}
 
-    std::string itemName = "";
-    std::string weaponType = "";
-    std::string weaponId = "";
-    std::string weaponSlot = "0";
-    std::string wearName = "Factory New";
+/**
+ * Gets the next available inventory position for a new item
+ *
+ * @param steamId The steam ID of the player
+ * @param inventory_db Database connection
+ * @return The next available inventory position (skips position 1 for
+ * nametag)
+ */
+uint32_t GCNetwork_Inventory::GetNextInventoryPosition(uint64_t steamId,
+                                                       MYSQL *inventory_db) {
+  if (!inventory_db) {
+    logger::error("GetNextInventoryPosition: Database connection is null");
+    return 2; // Default to position 2 if we can't query
+  }
 
-    // attributes
-    // Modify the SaveNewItemToDatabase function to correctly handle souvenir
-    // items Only showing the relevant part that needs to be changed
+  // SQL injection safe: using prepared statement
+  std::string steamId2 = GCNetwork_Users::SteamID64ToSteamID2(steamId);
+  auto stmtOpt = createPreparedStatement(
+      inventory_db,
+      "SELECT COALESCE(MAX(acknowledged), 1) FROM csgo_items WHERE "
+      "owner_steamid2 = ?");
 
-    // attributes
-    for (int i = 0; i < item.attribute_size(); i++) {
-      const CSOEconItemAttribute &attr = item.attribute(i);
-      uint32_t attrDefIndex = attr.def_index();
+  if (!stmtOpt) {
+    logger::error("GetNextInventoryPosition: Failed to prepare statement");
+    return 2;
+  }
 
-      switch (attrDefIndex) {
-      case ATTR_PAINT_INDEX: // paint kit - this is the texture prefab
+  auto &stmt = *stmtOpt;
+  unsigned long steamIdLen = steamId2.length();
+  stmt.bindString(0, steamId2.c_str(), &steamIdLen);
+
+  if (!stmt.execute() || !stmt.storeResult()) {
+    logger::error("GetNextInventoryPosition: MySQL query failed: %s",
+                  stmt.error());
+    return 2;
+  }
+
+  uint32_t currentMaxPos = 1;
+  MYSQL_BIND resultBind[1];
+  memset(resultBind, 0, sizeof(resultBind));
+
+  resultBind[0].buffer_type = MYSQL_TYPE_LONG;
+  resultBind[0].buffer = &currentMaxPos;
+
+  if (!stmt.bindResult(resultBind) || stmt.fetch() != 0) {
+    // If fetch fails, we'll use the default currentMaxPos = 1
+  }
+
+  uint32_t nextPosition = currentMaxPos + 1;
+  if (nextPosition <= 1)
+    nextPosition = 2; // Skip position 1 (reserved for nametag)
+
+  logger::info(
+      "GetNextInventoryPosition: Next available position for user %llu is %u",
+      steamId, nextPosition);
+
+  return nextPosition;
+}
+
+/**
+ * Handles the unboxing of a crate, generating a new item and saving it to the
+ * database
+ *
+ * @param p2psocket The socket to send updates to
+ * Saves a newly generated item to the database
+ *
+ * @param item The CSOEconItem to save
+ * @param steamId The steam ID of the owner
+ * @param inventory_db Database connection
+ * @param isBaseWeapon Whether this is a base weapon without a skin (default:
+ * false)
+ * @return The ID of the newly created item, or 0 on failure
+ */
+uint64_t GCNetwork_Inventory::SaveNewItemToDatabase(const CSOEconItem &item,
+                                                    uint64_t steamId,
+                                                    MYSQL *inventory_db,
+                                                    bool isBaseWeapon) {
+  if (!g_itemSchema || !inventory_db) {
+    logger::error(
+        "SaveNewItemToDatabase: ItemSchema or database connection is null");
+    return 0;
+  }
+
+  // extract item info
+  uint32_t defIndex = item.def_index();
+  uint32_t quality = item.quality();
+
+  // for base weapons use NULL for
+  bool isBaseItem = isBaseWeapon;
+  uint32_t rarity =
+      isBaseItem ? 0 : (item.rarity() > 0 ? item.rarity() - 1 : 0);
+
+  // default, some will get populated later
+  std::string itemIdStr = "";
+  float floatValue = 0.0f;
+  uint32_t paintIndex = 0;
+  uint32_t patternIndex = 0;
+  bool statTrak = false;
+  uint32_t statTrakKills = 0;
+  std::string nameTag = item.has_custom_name() ? item.custom_name() : "";
+  bool tradable = isBaseItem ? false : true; // Set to 0 for base items
+  std::string acquiredBy =
+      isBaseItem ? "default" : "0"; // Set to "default" for base items
+
+  std::string itemName = "";
+  std::string weaponType = "";
+  std::string weaponId = "";
+  std::string weaponSlot = "0";
+  std::string wearName = "Factory New";
+
+  // attributes
+  // Modify the SaveNewItemToDatabase function to correctly handle souvenir
+  // items Only showing the relevant part that needs to be changed
+
+  // attributes
+  for (int i = 0; i < item.attribute_size(); i++) {
+    const CSOEconItemAttribute &attr = item.attribute(i);
+    uint32_t attrDefIndex = attr.def_index();
+
+    switch (attrDefIndex) {
+    case ATTR_PAINT_INDEX: // paint kit - this is the texture prefab
+      paintIndex = g_itemSchema->AttributeUint32(&attr);
+      break;
+
+    case ATTR_PAINT_WEAR: // float
+      floatValue = g_itemSchema->AttributeFloat(&attr);
+      // wear name
+      if (floatValue < 0.07f)
+        wearName = "Factory New";
+      else if (floatValue < 0.15f)
+        wearName = "Minimal Wear";
+      else if (floatValue < 0.38f)
+        wearName = "Field-Tested";
+      else if (floatValue < 0.45f)
+        wearName = "Well-Worn";
+      else
+        wearName = "Battle-Scarred";
+      break;
+
+    case ATTR_PAINT_SEED: // seed
+      patternIndex = g_itemSchema->AttributeUint32(&attr);
+      break;
+
+    case ATTR_KILLEATER_SCORE: // StatTrak
+      statTrak = true;
+      statTrakKills = g_itemSchema->AttributeUint32(&attr);
+      break;
+
+    case ATTR_ITEM_STICKER_ID:
+      if (defIndex == 1209) {
         paintIndex = g_itemSchema->AttributeUint32(&attr);
-        break;
-
-      case ATTR_PAINT_WEAR: // float
-        floatValue = g_itemSchema->AttributeFloat(&attr);
-        // wear name
-        if (floatValue < 0.07f)
-          wearName = "Factory New";
-        else if (floatValue < 0.15f)
-          wearName = "Minimal Wear";
-        else if (floatValue < 0.38f)
-          wearName = "Field-Tested";
-        else if (floatValue < 0.45f)
-          wearName = "Well-Worn";
-        else
-          wearName = "Battle-Scarred";
-        break;
-
-      case ATTR_PAINT_SEED: // seed
-        patternIndex = g_itemSchema->AttributeUint32(&attr);
-        break;
-
-      case ATTR_KILLEATER_SCORE: // StatTrak
-        statTrak = true;
-        statTrakKills = g_itemSchema->AttributeUint32(&attr);
-        break;
-
-      case ATTR_ITEM_STICKER_ID:
-        if (defIndex == 1209) {
-          paintIndex = g_itemSchema->AttributeUint32(&attr);
-        }
-        break;
-
-      case ATTR_ITEM_MUSICKIT_ID:
-        if (defIndex == 1314) {
-          paintIndex = g_itemSchema->AttributeUint32(&attr);
-        }
-        break;
       }
+      break;
+
+    case ATTR_ITEM_MUSICKIT_ID:
+      if (defIndex == 1314) {
+        paintIndex = g_itemSchema->AttributeUint32(&attr);
+      }
+      break;
     }
+  }
 
-    // get attributes for stickers only
-    std::vector<std::pair<uint32_t, float>> stickers;
-    stickers.resize(5, {0, 0.0f}); // 5 max
+  // get attributes for stickers only
+  std::vector<std::pair<uint32_t, float>> stickers;
+  stickers.resize(5, {0, 0.0f}); // 5 max
 
-    for (int i = 0; i < item.attribute_size(); i++) {
-      const CSOEconItemAttribute &attr = item.attribute(i);
-      uint32_t attrDefIndex = attr.def_index();
+  for (int i = 0; i < item.attribute_size(); i++) {
+    const CSOEconItemAttribute &attr = item.attribute(i);
+    uint32_t attrDefIndex = attr.def_index();
 
-      // sticker attributes (113, 117, 121, 125, 129)
-      if (attrDefIndex >= 113 && attrDefIndex <= 133 &&
-          (attrDefIndex - 113) % 4 == 0) {
-        uint32_t stickerPos = (attrDefIndex - 113) / 4;
-        if (stickerPos < stickers.size()) {
-          uint32_t stickerId = g_itemSchema->AttributeUint32(&attr);
+    // sticker attributes (113, 117, 121, 125, 129)
+    if (attrDefIndex >= 113 && attrDefIndex <= 133 &&
+        (attrDefIndex - 113) % 4 == 0) {
+      uint32_t stickerPos = (attrDefIndex - 113) / 4;
+      if (stickerPos < stickers.size()) {
+        uint32_t stickerId = g_itemSchema->AttributeUint32(&attr);
 
-          float stickerWear = 0.0f;
-          for (int j = 0; j < item.attribute_size(); j++) {
-            const CSOEconItemAttribute &wearAttr = item.attribute(j);
-            if (wearAttr.def_index() == attrDefIndex + 1) {
-              stickerWear = g_itemSchema->AttributeFloat(&wearAttr);
-              break;
-            }
+        float stickerWear = 0.0f;
+        for (int j = 0; j < item.attribute_size(); j++) {
+          const CSOEconItemAttribute &wearAttr = item.attribute(j);
+          if (wearAttr.def_index() == attrDefIndex + 1) {
+            stickerWear = g_itemSchema->AttributeFloat(&wearAttr);
+            break;
           }
+        }
 
-          stickers[stickerPos] = {stickerId, stickerWear};
+        stickers[stickerPos] = {stickerId, stickerWear};
+      }
+    }
+  }
+
+  // get info
+  if (!GetWeaponInfo(defIndex, weaponType, weaponId)) {
+    // If GetWeaponInfo fails, try to get info from the ItemSchema
+    auto itemInfoIter = g_itemSchema->m_itemInfo.find(defIndex);
+    if (itemInfoIter != g_itemSchema->m_itemInfo.end()) {
+      const auto &itemInfo = itemInfoIter->second;
+      std::string_view displayName = itemInfo.GetDisplayName();
+      weaponType = std::string(displayName);
+      weaponId = "weapon_" + std::string(itemInfo.m_name);
+    } else {
+      // If all else fails, use generic naming
+      weaponType = "Unknown Weapon";
+      weaponId = "weapon_" + std::to_string(defIndex);
+    }
+  }
+
+  // Set item name based on weapon type and paint index
+  itemName = weaponType;
+
+  // Construct item_id string based on item type
+  if (defIndex == 1209) // Sticker
+  {
+    itemIdStr = "sticker-" + std::to_string(paintIndex);
+  } else if (defIndex == 1314) // Music kit
+  {
+    itemIdStr = "music_kit-" + std::to_string(paintIndex);
+  } else if (defIndex >= 500 && defIndex <= 552) // Knife
+  {
+    if (isBaseWeapon || paintIndex == 0) {
+      // Base knife with no skin
+      itemIdStr = "skin-" + std::to_string(defIndex) + "_0_0";
+    } else {
+      // Knife with skin
+      itemIdStr = "skin-" + std::to_string(defIndex) + "_" +
+                  std::to_string(paintIndex) + "_0";
+    }
+  } else // Regular weapon
+  {
+    if (isBaseWeapon || paintIndex == 0) {
+      // Base weapon with no skin
+      itemIdStr = "skin-" + std::to_string(defIndex) + "_0_0";
+    } else {
+      // Weapon with skin
+      itemIdStr = "skin-" + std::to_string(defIndex) + "_" +
+                  std::to_string(paintIndex) + "_0";
+    }
+  }
+
+  // For weapons with a paint kit (skin), add the skin name to the item name
+  if (paintIndex > 0 && defIndex != 1209 && defIndex != 1314 && !isBaseWeapon) {
+    // Look for the paint kit info
+    for (const auto &[name, paintKit] : g_itemSchema->m_paintKitInfo) {
+      if (paintKit.m_defIndex == paintIndex) {
+        // Get the skin name
+        std::string_view skinName = paintKit.GetDisplayName();
+        if (!skinName.empty()) {
+          itemName = itemName + " | " + std::string(skinName);
+          break;
         }
       }
     }
+  }
 
-    // get info
-    if (!GetWeaponInfo(defIndex, weaponType, weaponId)) {
-      // If GetWeaponInfo fails, try to get info from the ItemSchema
+  // Calculate sticker slots based on weapon type (most weapons have 4-5
+  // slots)
+  uint32_t stickerSlots = 0;
+  if (defIndex != 1209 && defIndex != 1314) {
+    // Special cases for weapons with 5 sticker slots
+    if (defIndex == 11 || defIndex == 64) { // G3SG1 or R8 Revolver
+      stickerSlots = 5;
+    } else {
+      // Default for most weapons: 4 sticker slots
+      stickerSlots = 4;
+    }
+  }
+
+  // SQL injection safe: using prepared statement for the entire massive
+  // INSERT We use a fixed column list to enable statement preparation and
+  // security.
+  auto stmtOpt = createPreparedStatement(
+      inventory_db,
+      "INSERT INTO csgo_items ("
+      "owner_steamid2, item_id, name, nametag, weapon_type, weapon_id, "
+      "weapon_slot, wear, floatval, paint_index, pattern_index, rarity, "
+      "quality, tradable, commodity, stattrak, stattrak_kills, "
+      "sticker_slots, sticker_1, sticker_1_wear, sticker_2, sticker_2_wear, "
+      "sticker_3, sticker_3_wear, sticker_4, sticker_4_wear, "
+      "sticker_5, sticker_5_wear, market_price, equipped_ct, "
+      "equipped_t, acquired_by, acknowledged"
+      ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
+      "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+
+  if (!stmtOpt) {
+    logger::error("SaveNewItemToDatabase: Failed to prepare insert statement");
+    return 0;
+  }
+
+  auto &stmt = *stmtOpt;
+  std::string steamId2 = GCNetwork_Users::SteamID64ToSteamID2(steamId);
+  unsigned long steamIdLen = steamId2.length();
+  unsigned long itemIdLen = itemIdStr.length();
+  unsigned long itemNameLen = itemName.length();
+  unsigned long nameTagLen = nameTag.length();
+  unsigned long weaponTypeLen = weaponType.length();
+  unsigned long weaponIdLen = weaponId.length();
+  unsigned long weaponSlotLen = weaponSlot.length();
+  unsigned long wearNameLen = wearName.length();
+  unsigned long acquiredByLen = acquiredBy.length();
+
+  // Bind parameters
+  stmt.bindString(0, steamId2.c_str(), &steamIdLen);
+  stmt.bindString(1, itemIdStr.c_str(), &itemIdLen);
+  stmt.bindString(2, itemName.c_str(), &itemNameLen);
+
+  if (!nameTag.empty()) {
+    stmt.bindString(3, nameTag.c_str(), &nameTagLen);
+  } else {
+    stmt.bindNull(3);
+  }
+
+  stmt.bindString(4, weaponType.c_str(), &weaponTypeLen);
+  stmt.bindString(5, weaponId.c_str(), &weaponIdLen);
+  stmt.bindString(6, weaponSlot.c_str(), &weaponSlotLen);
+  stmt.bindString(7, wearName.c_str(), &wearNameLen);
+
+  if (isBaseItem) {
+    stmt.bindNull(8);
+  } else {
+    stmt.bindFloat(8, &floatValue);
+  }
+
+  stmt.bindUint32(9, &paintIndex);
+  stmt.bindUint32(10, &patternIndex);
+
+  if (isBaseItem) {
+    stmt.bindNull(11);
+  } else {
+    stmt.bindUint32(11, &rarity);
+  }
+
+  stmt.bindUint32(12, &quality);
+  uint32_t tradableVal = tradable ? 1 : 0;
+  stmt.bindUint32(13, &tradableVal);
+  uint32_t commodityVal = 0;
+  stmt.bindUint32(14, &commodityVal);
+  uint32_t statTrakVal = statTrak ? 1 : 0;
+  stmt.bindUint32(15, &statTrakVal);
+
+  if (statTrak) {
+    stmt.bindUint32(16, &statTrakKills);
+  } else {
+    stmt.bindNull(16);
+  }
+
+  stmt.bindUint32(17, &stickerSlots);
+
+  // Bind stickers (18-27)
+  for (int i = 0; i < 5; i++) {
+    if (i < static_cast<int>(stickers.size()) && stickers[i].first > 0) {
+      stmt.bindUint32(18 + (i * 2), &stickers[i].first);
+      stmt.bindFloat(19 + (i * 2), &stickers[i].second);
+    } else {
+      stmt.bindNull(18 + (i * 2));
+      stmt.bindNull(19 + (i * 2));
+    }
+  }
+
+  float marketPrice = 0.0f;
+  stmt.bindFloat(28, &marketPrice);
+  uint32_t zeroVal = 0;
+  stmt.bindUint32(29, &zeroVal); // equipped_ct
+  stmt.bindUint32(30, &zeroVal); // equipped_t
+  stmt.bindString(31, acquiredBy.c_str(), &acquiredByLen);
+  stmt.bindUint32(32, &zeroVal); // acknowledged
+
+  if (!stmt.execute()) {
+    logger::error("SaveNewItemToDatabase: MySQL query failed: %s",
+                  stmt.error());
+    return 0;
+  }
+
+  // Get the newly inserted item ID
+  uint64_t newItemId = mysql_insert_id(inventory_db);
+  logger::info(
+      "SaveNewItemToDatabase: Successfully inserted new item with ID %llu",
+      newItemId);
+
+  return newItemId;
+}
+
+/**
+ * Gets the display name and weapon identifier for a given defIndex
+ *
+ * @param defIndex The definition index of the weapon
+ * @param weaponName Output parameter for the weapon's display name
+ * @param weaponId Output parameter for the weapon's identifier
+ * @return True if the information was found, false otherwise
+ */
+bool GCNetwork_Inventory::GetWeaponInfo(uint32_t defIndex,
+                                        std::string &weaponName,
+                                        std::string &weaponId) {
+  weaponName = "";
+  weaponId = "";
+
+  // Check if this is a known weapon type
+  switch (defIndex) {
+  // Pistols
+  case 1:
+    weaponName = "Desert Eagle";
+    weaponId = "weapon_deagle";
+    break;
+  case 2:
+    weaponName = "Dual Berettas";
+    weaponId = "weapon_elite";
+    break;
+  case 3:
+    weaponName = "Five-SeveN";
+    weaponId = "weapon_fiveseven";
+    break;
+  case 4:
+    weaponName = "Glock-18";
+    weaponId = "weapon_glock";
+    break;
+  case 30:
+    weaponName = "Tec-9";
+    weaponId = "weapon_tec9";
+    break;
+  case 32:
+    weaponName = "P2000";
+    weaponId = "weapon_hkp2000";
+    break;
+  case 36:
+    weaponName = "P250";
+    weaponId = "weapon_p250";
+    break;
+  case 61:
+    weaponName = "USP-S";
+    weaponId = "weapon_usp_silencer";
+    break;
+  case 63:
+    weaponName = "CZ75-Auto";
+    weaponId = "weapon_cz75a";
+    break;
+  case 64:
+    weaponName = "R8 Revolver";
+    weaponId = "weapon_revolver";
+    break;
+
+  // Rifles
+  case 7:
+    weaponName = "AK-47";
+    weaponId = "weapon_ak47";
+    break;
+  case 8:
+    weaponName = "AUG";
+    weaponId = "weapon_aug";
+    break;
+  case 9:
+    weaponName = "AWP";
+    weaponId = "weapon_awp";
+    break;
+  case 10:
+    weaponName = "FAMAS";
+    weaponId = "weapon_famas";
+    break;
+  case 11:
+    weaponName = "G3SG1";
+    weaponId = "weapon_g3sg1";
+    break;
+  case 13:
+    weaponName = "Galil AR";
+    weaponId = "weapon_galilar";
+    break;
+  case 16:
+    weaponName = "M4A4";
+    weaponId = "weapon_m4a1";
+    break;
+  case 38:
+    weaponName = "SCAR-20";
+    weaponId = "weapon_scar20";
+    break;
+  case 39:
+    weaponName = "SG 553";
+    weaponId = "weapon_sg556";
+    break;
+  case 40:
+    weaponName = "SSG 08";
+    weaponId = "weapon_ssg08";
+    break;
+  case 60:
+    weaponName = "M4A1-S";
+    weaponId = "weapon_m4a1_silencer";
+    break;
+
+  // SMGs
+  case 17:
+    weaponName = "MAC-10";
+    weaponId = "weapon_mac10";
+    break;
+  case 19:
+    weaponName = "P90";
+    weaponId = "weapon_p90";
+    break;
+  case 23:
+    weaponName = "MP5-SD";
+    weaponId = "weapon_mp5sd";
+    break;
+  case 24:
+    weaponName = "UMP-45";
+    weaponId = "weapon_ump45";
+    break;
+  case 26:
+    weaponName = "PP-Bizon";
+    weaponId = "weapon_bizon";
+    break;
+  case 33:
+    weaponName = "MP7";
+    weaponId = "weapon_mp7";
+    break;
+  case 34:
+    weaponName = "MP9";
+    weaponId = "weapon_mp9";
+    break;
+
+  // Heavy
+  case 14:
+    weaponName = "M249";
+    weaponId = "weapon_m249";
+    break;
+  case 25:
+    weaponName = "XM1014";
+    weaponId = "weapon_xm1014";
+    break;
+  case 27:
+    weaponName = "MAG-7";
+    weaponId = "weapon_mag7";
+    break;
+  case 28:
+    weaponName = "Negev";
+    weaponId = "weapon_negev";
+    break;
+  case 29:
+    weaponName = "Sawed-Off";
+    weaponId = "weapon_sawedoff";
+    break;
+  case 35:
+    weaponName = "Nova";
+    weaponId = "weapon_nova";
+    break;
+
+  // Default Knives
+  case 42:
+    weaponName = "Knife (CT)";
+    weaponId = "weapon_knife";
+    break;
+  case 59:
+    weaponName = "Knife (T)";
+    weaponId = "weapon_knife_t";
+    break;
+
+  // Special Knives
+  case 500:
+    weaponName = "Bayonet";
+    weaponId = "weapon_bayonet";
+    break;
+  case 503:
+    weaponName = "Classic Knife";
+    weaponId = "weapon_knife_css";
+    break;
+  case 505:
+    weaponName = "Flip Knife";
+    weaponId = "weapon_knife_flip";
+    break;
+  case 506:
+    weaponName = "Gut Knife";
+    weaponId = "weapon_knife_gut";
+    break;
+  case 507:
+    weaponName = "Karambit";
+    weaponId = "weapon_knife_karambit";
+    break;
+  case 508:
+    weaponName = "M9 Bayonet";
+    weaponId = "weapon_knife_m9_bayonet";
+    break;
+  case 509:
+    weaponName = "Huntsman Knife";
+    weaponId = "weapon_knife_tactical";
+    break;
+  case 512:
+    weaponName = "Falchion Knife";
+    weaponId = "weapon_knife_falchion";
+    break;
+  case 514:
+    weaponName = "Bowie Knife";
+    weaponId = "weapon_knife_survival_bowie";
+    break;
+  case 515:
+    weaponName = "Butterfly Knife";
+    weaponId = "weapon_knife_butterfly";
+    break;
+  case 516:
+    weaponName = "Shadow Daggers";
+    weaponId = "weapon_knife_push";
+    break;
+  case 517:
+    weaponName = "Paracord Knife";
+    weaponId = "weapon_knife_cord";
+    break;
+  case 518:
+    weaponName = "Survival Knife";
+    weaponId = "weapon_knife_canis";
+    break;
+  case 519:
+    weaponName = "Ursus Knife";
+    weaponId = "weapon_knife_ursus";
+    break;
+  case 520:
+    weaponName = "Navaja Knife";
+    weaponId = "weapon_knife_gypsy_jackknife";
+    break;
+  case 521:
+    weaponName = "Nomad Knife";
+    weaponId = "weapon_knife_outdoor";
+    break;
+  case 522:
+    weaponName = "Stiletto Knife";
+    weaponId = "weapon_knife_stiletto";
+    break;
+  case 523:
+    weaponName = "Talon Knife";
+    weaponId = "weapon_knife_widowmaker";
+    break;
+  case 525:
+    weaponName = "Skeleton Knife";
+    weaponId = "weapon_knife_skeleton";
+    break;
+
+  // Equipment
+  case 31:
+    weaponName = "Zeus x27";
+    weaponId = "weapon_taser";
+    break;
+  case 49:
+    weaponName = "C4";
+    weaponId = "weapon_c4";
+    break;
+
+  // Other special items
+  case 1209:
+    weaponName = "Sticker";
+    weaponId = "sticker";
+    break;
+  case 1314:
+    weaponName = "Music Kit";
+    weaponId = "music_kit";
+    break;
+
+  default:
+    // Try to fetch from ItemSchema for unknown defIndex
+    if (g_itemSchema) {
       auto itemInfoIter = g_itemSchema->m_itemInfo.find(defIndex);
       if (itemInfoIter != g_itemSchema->m_itemInfo.end()) {
         const auto &itemInfo = itemInfoIter->second;
         std::string_view displayName = itemInfo.GetDisplayName();
-        weaponType = std::string(displayName);
+        weaponName = std::string(displayName);
         weaponId = "weapon_" + std::string(itemInfo.m_name);
-      } else {
-        // If all else fails, use generic naming
-        weaponType = "Unknown Weapon";
-        weaponId = "weapon_" + std::to_string(defIndex);
+        return !weaponName.empty();
       }
-    }
-
-    // Set item name based on weapon type and paint index
-    itemName = weaponType;
-
-    // Construct item_id string based on item type
-    if (defIndex == 1209) // Sticker
-    {
-      itemIdStr = "sticker-" + std::to_string(paintIndex);
-    } else if (defIndex == 1314) // Music kit
-    {
-      itemIdStr = "music_kit-" + std::to_string(paintIndex);
-    } else if (defIndex >= 500 && defIndex <= 552) // Knife
-    {
-      if (isBaseWeapon || paintIndex == 0) {
-        // Base knife with no skin
-        itemIdStr = "skin-" + std::to_string(defIndex) + "_0_0";
-      } else {
-        // Knife with skin
-        itemIdStr = "skin-" + std::to_string(defIndex) + "_" +
-                    std::to_string(paintIndex) + "_0";
-      }
-    } else // Regular weapon
-    {
-      if (isBaseWeapon || paintIndex == 0) {
-        // Base weapon with no skin
-        itemIdStr = "skin-" + std::to_string(defIndex) + "_0_0";
-      } else {
-        // Weapon with skin
-        itemIdStr = "skin-" + std::to_string(defIndex) + "_" +
-                    std::to_string(paintIndex) + "_0";
-      }
-    }
-
-    // For weapons with a paint kit (skin), add the skin name to the item name
-    if (paintIndex > 0 && defIndex != 1209 && defIndex != 1314 &&
-        !isBaseWeapon) {
-      // Look for the paint kit info
-      for (const auto &[name, paintKit] : g_itemSchema->m_paintKitInfo) {
-        if (paintKit.m_defIndex == paintIndex) {
-          // Get the skin name
-          std::string_view skinName = paintKit.GetDisplayName();
-          if (!skinName.empty()) {
-            itemName = itemName + " | " + std::string(skinName);
-            break;
-          }
-        }
-      }
-    }
-
-    // Calculate sticker slots based on weapon type (most weapons have 4-5
-    // slots)
-    uint32_t stickerSlots = 0;
-    if (defIndex != 1209 && defIndex != 1314) {
-      // Special cases for weapons with 5 sticker slots
-      if (defIndex == 11 || defIndex == 64) { // G3SG1 or R8 Revolver
-        stickerSlots = 5;
-      } else {
-        // Default for most weapons: 4 sticker slots
-        stickerSlots = 4;
-      }
-    }
-
-    // SQL injection safe: using prepared statement for the entire massive
-    // INSERT We use a fixed column list to enable statement preparation and
-    // security.
-    auto stmtOpt = createPreparedStatement(
-        inventory_db,
-        "INSERT INTO csgo_items ("
-        "owner_steamid2, item_id, name, nametag, weapon_type, weapon_id, "
-        "weapon_slot, wear, floatval, paint_index, pattern_index, rarity, "
-        "quality, tradable, commodity, stattrak, stattrak_kills, "
-        "sticker_slots, sticker_1, sticker_1_wear, sticker_2, sticker_2_wear, "
-        "sticker_3, sticker_3_wear, sticker_4, sticker_4_wear, "
-        "sticker_5, sticker_5_wear, market_price, equipped_ct, "
-        "equipped_t, acquired_by, acknowledged"
-        ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, "
-        "?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-
-    if (!stmtOpt) {
-      logger::error(
-          "SaveNewItemToDatabase: Failed to prepare insert statement");
-      return 0;
-    }
-
-    auto &stmt = *stmtOpt;
-    std::string steamId2 = GCNetwork_Users::SteamID64ToSteamID2(steamId);
-    unsigned long steamIdLen = steamId2.length();
-    unsigned long itemIdLen = itemIdStr.length();
-    unsigned long itemNameLen = itemName.length();
-    unsigned long nameTagLen = nameTag.length();
-    unsigned long weaponTypeLen = weaponType.length();
-    unsigned long weaponIdLen = weaponId.length();
-    unsigned long weaponSlotLen = weaponSlot.length();
-    unsigned long wearNameLen = wearName.length();
-    unsigned long acquiredByLen = acquiredBy.length();
-
-    // Bind parameters
-    stmt.bindString(0, steamId2.c_str(), &steamIdLen);
-    stmt.bindString(1, itemIdStr.c_str(), &itemIdLen);
-    stmt.bindString(2, itemName.c_str(), &itemNameLen);
-
-    if (!nameTag.empty()) {
-      stmt.bindString(3, nameTag.c_str(), &nameTagLen);
-    } else {
-      stmt.bindNull(3);
-    }
-
-    stmt.bindString(4, weaponType.c_str(), &weaponTypeLen);
-    stmt.bindString(5, weaponId.c_str(), &weaponIdLen);
-    stmt.bindString(6, weaponSlot.c_str(), &weaponSlotLen);
-    stmt.bindString(7, wearName.c_str(), &wearNameLen);
-
-    if (isBaseItem) {
-      stmt.bindNull(8);
-    } else {
-      stmt.bindFloat(8, &floatValue);
-    }
-
-    stmt.bindUint32(9, &paintIndex);
-    stmt.bindUint32(10, &patternIndex);
-
-    if (isBaseItem) {
-      stmt.bindNull(11);
-    } else {
-      stmt.bindUint32(11, &rarity);
-    }
-
-    stmt.bindUint32(12, &quality);
-    uint32_t tradableVal = tradable ? 1 : 0;
-    stmt.bindUint32(13, &tradableVal);
-    uint32_t commodityVal = 0;
-    stmt.bindUint32(14, &commodityVal);
-    uint32_t statTrakVal = statTrak ? 1 : 0;
-    stmt.bindUint32(15, &statTrakVal);
-
-    if (statTrak) {
-      stmt.bindUint32(16, &statTrakKills);
-    } else {
-      stmt.bindNull(16);
-    }
-
-    stmt.bindUint32(17, &stickerSlots);
-
-    // Bind stickers (18-27)
-    for (int i = 0; i < 5; i++) {
-      if (i < static_cast<int>(stickers.size()) && stickers[i].first > 0) {
-        stmt.bindUint32(18 + (i * 2), &stickers[i].first);
-        stmt.bindFloat(19 + (i * 2), &stickers[i].second);
-      } else {
-        stmt.bindNull(18 + (i * 2));
-        stmt.bindNull(19 + (i * 2));
-      }
-    }
-
-    float marketPrice = 0.0f;
-    stmt.bindFloat(28, &marketPrice);
-    uint32_t zeroVal = 0;
-    stmt.bindUint32(29, &zeroVal); // equipped_ct
-    stmt.bindUint32(30, &zeroVal); // equipped_t
-    stmt.bindString(31, acquiredBy.c_str(), &acquiredByLen);
-    stmt.bindUint32(32, &zeroVal); // acknowledged
-
-    if (!stmt.execute()) {
-      logger::error("SaveNewItemToDatabase: MySQL query failed: %s",
-                    stmt.error());
-      return 0;
-    }
-
-    // Get the newly inserted item ID
-    uint64_t newItemId = mysql_insert_id(inventory_db);
-    logger::info(
-        "SaveNewItemToDatabase: Successfully inserted new item with ID %llu",
-        newItemId);
-
-    return newItemId;
-  }
-
-  /**
-   * Gets the display name and weapon identifier for a given defIndex
-   *
-   * @param defIndex The definition index of the weapon
-   * @param weaponName Output parameter for the weapon's display name
-   * @param weaponId Output parameter for the weapon's identifier
-   * @return True if the information was found, false otherwise
-   */
-  bool GCNetwork_Inventory::GetWeaponInfo(
-      uint32_t defIndex, std::string &weaponName, std::string &weaponId) {
-    weaponName = "";
-    weaponId = "";
-
-    // Check if this is a known weapon type
-    switch (defIndex) {
-    // Pistols
-    case 1:
-      weaponName = "Desert Eagle";
-      weaponId = "weapon_deagle";
-      break;
-    case 2:
-      weaponName = "Dual Berettas";
-      weaponId = "weapon_elite";
-      break;
-    case 3:
-      weaponName = "Five-SeveN";
-      weaponId = "weapon_fiveseven";
-      break;
-    case 4:
-      weaponName = "Glock-18";
-      weaponId = "weapon_glock";
-      break;
-    case 30:
-      weaponName = "Tec-9";
-      weaponId = "weapon_tec9";
-      break;
-    case 32:
-      weaponName = "P2000";
-      weaponId = "weapon_hkp2000";
-      break;
-    case 36:
-      weaponName = "P250";
-      weaponId = "weapon_p250";
-      break;
-    case 61:
-      weaponName = "USP-S";
-      weaponId = "weapon_usp_silencer";
-      break;
-    case 63:
-      weaponName = "CZ75-Auto";
-      weaponId = "weapon_cz75a";
-      break;
-    case 64:
-      weaponName = "R8 Revolver";
-      weaponId = "weapon_revolver";
-      break;
-
-    // Rifles
-    case 7:
-      weaponName = "AK-47";
-      weaponId = "weapon_ak47";
-      break;
-    case 8:
-      weaponName = "AUG";
-      weaponId = "weapon_aug";
-      break;
-    case 9:
-      weaponName = "AWP";
-      weaponId = "weapon_awp";
-      break;
-    case 10:
-      weaponName = "FAMAS";
-      weaponId = "weapon_famas";
-      break;
-    case 11:
-      weaponName = "G3SG1";
-      weaponId = "weapon_g3sg1";
-      break;
-    case 13:
-      weaponName = "Galil AR";
-      weaponId = "weapon_galilar";
-      break;
-    case 16:
-      weaponName = "M4A4";
-      weaponId = "weapon_m4a1";
-      break;
-    case 38:
-      weaponName = "SCAR-20";
-      weaponId = "weapon_scar20";
-      break;
-    case 39:
-      weaponName = "SG 553";
-      weaponId = "weapon_sg556";
-      break;
-    case 40:
-      weaponName = "SSG 08";
-      weaponId = "weapon_ssg08";
-      break;
-    case 60:
-      weaponName = "M4A1-S";
-      weaponId = "weapon_m4a1_silencer";
-      break;
-
-    // SMGs
-    case 17:
-      weaponName = "MAC-10";
-      weaponId = "weapon_mac10";
-      break;
-    case 19:
-      weaponName = "P90";
-      weaponId = "weapon_p90";
-      break;
-    case 23:
-      weaponName = "MP5-SD";
-      weaponId = "weapon_mp5sd";
-      break;
-    case 24:
-      weaponName = "UMP-45";
-      weaponId = "weapon_ump45";
-      break;
-    case 26:
-      weaponName = "PP-Bizon";
-      weaponId = "weapon_bizon";
-      break;
-    case 33:
-      weaponName = "MP7";
-      weaponId = "weapon_mp7";
-      break;
-    case 34:
-      weaponName = "MP9";
-      weaponId = "weapon_mp9";
-      break;
-
-    // Heavy
-    case 14:
-      weaponName = "M249";
-      weaponId = "weapon_m249";
-      break;
-    case 25:
-      weaponName = "XM1014";
-      weaponId = "weapon_xm1014";
-      break;
-    case 27:
-      weaponName = "MAG-7";
-      weaponId = "weapon_mag7";
-      break;
-    case 28:
-      weaponName = "Negev";
-      weaponId = "weapon_negev";
-      break;
-    case 29:
-      weaponName = "Sawed-Off";
-      weaponId = "weapon_sawedoff";
-      break;
-    case 35:
-      weaponName = "Nova";
-      weaponId = "weapon_nova";
-      break;
-
-    // Default Knives
-    case 42:
-      weaponName = "Knife (CT)";
-      weaponId = "weapon_knife";
-      break;
-    case 59:
-      weaponName = "Knife (T)";
-      weaponId = "weapon_knife_t";
-      break;
-
-    // Special Knives
-    case 500:
-      weaponName = "Bayonet";
-      weaponId = "weapon_bayonet";
-      break;
-    case 503:
-      weaponName = "Classic Knife";
-      weaponId = "weapon_knife_css";
-      break;
-    case 505:
-      weaponName = "Flip Knife";
-      weaponId = "weapon_knife_flip";
-      break;
-    case 506:
-      weaponName = "Gut Knife";
-      weaponId = "weapon_knife_gut";
-      break;
-    case 507:
-      weaponName = "Karambit";
-      weaponId = "weapon_knife_karambit";
-      break;
-    case 508:
-      weaponName = "M9 Bayonet";
-      weaponId = "weapon_knife_m9_bayonet";
-      break;
-    case 509:
-      weaponName = "Huntsman Knife";
-      weaponId = "weapon_knife_tactical";
-      break;
-    case 512:
-      weaponName = "Falchion Knife";
-      weaponId = "weapon_knife_falchion";
-      break;
-    case 514:
-      weaponName = "Bowie Knife";
-      weaponId = "weapon_knife_survival_bowie";
-      break;
-    case 515:
-      weaponName = "Butterfly Knife";
-      weaponId = "weapon_knife_butterfly";
-      break;
-    case 516:
-      weaponName = "Shadow Daggers";
-      weaponId = "weapon_knife_push";
-      break;
-    case 517:
-      weaponName = "Paracord Knife";
-      weaponId = "weapon_knife_cord";
-      break;
-    case 518:
-      weaponName = "Survival Knife";
-      weaponId = "weapon_knife_canis";
-      break;
-    case 519:
-      weaponName = "Ursus Knife";
-      weaponId = "weapon_knife_ursus";
-      break;
-    case 520:
-      weaponName = "Navaja Knife";
-      weaponId = "weapon_knife_gypsy_jackknife";
-      break;
-    case 521:
-      weaponName = "Nomad Knife";
-      weaponId = "weapon_knife_outdoor";
-      break;
-    case 522:
-      weaponName = "Stiletto Knife";
-      weaponId = "weapon_knife_stiletto";
-      break;
-    case 523:
-      weaponName = "Talon Knife";
-      weaponId = "weapon_knife_widowmaker";
-      break;
-    case 525:
-      weaponName = "Skeleton Knife";
-      weaponId = "weapon_knife_skeleton";
-      break;
-
-    // Equipment
-    case 31:
-      weaponName = "Zeus x27";
-      weaponId = "weapon_taser";
-      break;
-    case 49:
-      weaponName = "C4";
-      weaponId = "weapon_c4";
-      break;
-
-    // Other special items
-    case 1209:
-      weaponName = "Sticker";
-      weaponId = "sticker";
-      break;
-    case 1314:
-      weaponName = "Music Kit";
-      weaponId = "music_kit";
-      break;
-
-    default:
-      // Try to fetch from ItemSchema for unknown defIndex
-      if (g_itemSchema) {
-        auto itemInfoIter = g_itemSchema->m_itemInfo.find(defIndex);
-        if (itemInfoIter != g_itemSchema->m_itemInfo.end()) {
-          const auto &itemInfo = itemInfoIter->second;
-          std::string_view displayName = itemInfo.GetDisplayName();
-          weaponName = std::string(displayName);
-          weaponId = "weapon_" + std::string(itemInfo.m_name);
-          return !weaponName.empty();
-        }
-      }
-      return false;
-    }
-
-    return true;
-  }
-
-  //
-  // ITEM UPDATES
-  //
-
-  /**
-   * Deletes an item from the database and notifies the client
-   *
-   * @param p2psocket The socket to notify (optional)
-   * @param steamId The steam ID of the item's owner
-   * @param itemId The unique ID of the item to delete
-   * @param inventory_db Database connection to delete the item from
-   * @return True if the item was successfully deleted
-   */
-  bool GCNetwork_Inventory::DeleteItem(SNetSocket_t p2psocket, uint64_t steamId,
-                                       uint64_t itemId, MYSQL *inventory_db) {
-    if (!inventory_db) {
-      logger::error("DeleteItem: Database connection is null");
-      return false;
-    }
-
-    // Fetch the item before deleting it, so we can send its information
-    auto item = FetchItemFromDatabase(itemId, steamId, inventory_db);
-    if (!item) {
-      logger::error(
-          "DeleteItem: Item %llu not found or doesn't belong to user %llu",
-          itemId, steamId);
-      return false;
-    }
-
-    // Delete from database - SQL injection safe using prepared statement
-    std::string steamId2 = GCNetwork_Users::SteamID64ToSteamID2(steamId);
-
-    auto stmtOpt = createPreparedStatement(
-        inventory_db,
-        "DELETE FROM csgo_items WHERE id = ? AND owner_steamid2 = ?");
-
-    if (!stmtOpt) {
-      logger::error("DeleteItem: Failed to prepare delete statement");
-      return false;
-    }
-
-    auto &stmt = *stmtOpt;
-    uint64_t itemIdParam = itemId;
-    unsigned long steamIdLen = steamId2.length();
-    stmt.bindUint64(0, &itemIdParam);
-    stmt.bindString(1, steamId2.c_str(), &steamIdLen);
-
-    if (!stmt.execute()) {
-      logger::error("DeleteItem: MySQL delete query failed: %s", stmt.error());
-      return false;
-    }
-
-    if (stmt.affectedRows() == 0) {
-      logger::warning("DeleteItem: No rows affected when deleting item %llu",
-                      itemId);
-      return false;
-    }
-
-    logger::info("DeleteItem: Successfully deleted item %llu from database",
-                 itemId);
-
-    if (p2psocket != 0) {
-      logger::info("DeleteItem: Sending delete notification for item %llu to "
-                   "player %llu",
-                   itemId, steamId);
-
-      bool success = SendSOSingleObject(p2psocket, steamId, SOTypeItem, *item,
-                                        k_EMsgGC_CC_DeleteItem);
-      if (!success) {
-        logger::error(
-            "DeleteItem: Failed to send delete notification to client");
-        return false;
-      }
-    }
-
-    return true;
-  }
-
-  /**
-   * Sends a single object update to the client
-   *
-   * @param p2psocket The socket to send the message on
-   * @param steamId The steam ID of the player to update
-   * @param type_id The type of object being updated (e.g. SOTypeItem)
-   * @param object The protobuf object to send
-   * @param messageType The message type to use (defaults to
-   * k_EMsgGC_CC_GC2CL_SOSingleObject)
-   * @return True if message was sent successfully
-   */
-  bool GCNetwork_Inventory::SendSOSingleObject(
-      SNetSocket_t p2psocket, uint64_t steamId, SOTypeId type,
-      const google::protobuf::MessageLite &object, uint32_t messageType) {
-    CMsgSOSingleObject message;
-
-    // Set the type ID
-    message.set_type_id(type);
-
-    // Serialize the object to binary and set as object_data
-    message.set_object_data(object.SerializeAsString());
-
-    // Set the version
-    message.set_version(InventoryVersion);
-
-    // Set the owner ID
-    auto *owner = message.mutable_owner_soid();
-    owner->set_type(SoIdTypeSteamId);
-    owner->set_id(steamId);
-
-    // Create a network message and send it
-    NetworkMessage responseMsg =
-        NetworkMessage::FromProto(message, messageType);
-
-    logger::info("SendSOSingleObject: Sending object of type %d to %llu with "
-                 "message type %u, size: %u bytes",
-                 type, steamId, messageType, responseMsg.GetTotalSize());
-
-    bool success = responseMsg.WriteToSocket(p2psocket, true);
-    if (!success) {
-      logger::error("SendSOSingleObject: Failed to write message to socket - "
-                    "client likely disconnected");
-    }
-
-    return success;
-  }
-
-  /**
-   * Helper to add an object to a multiple objects message
-   *
-   * @param message The multiple objects message to add to
-   * @param type The type of object to add
-   * @param object The object to serialize and add
-   * @param collection Which collection to add to (added, modified, removed)
-   */
-  void GCNetwork_Inventory::AddToMultipleObjectsMessage(
-      CMsgSOMultipleObjects & message, SOTypeId type,
-      const google::protobuf::MessageLite &object,
-      const std::string &collection) {
-    CMsgSOMultipleObjects::SingleObject *single;
-
-    if (collection == "added") {
-      single = message.add_objects_added();
-    } else if (collection == "removed") {
-      single = message.add_objects_removed();
-    } else {
-      // Default to "modified"
-      single = message.add_objects_modified();
-    }
-
-    single->set_type_id(type);
-    single->set_object_data(object.SerializeAsString());
-  }
-
-  /**
-   * Initialize a multiple objects message with owner ID and version
-   *
-   * @param message The message to initialize
-   * @param steamId The steam ID of the owner
-   */
-  void GCNetwork_Inventory::InitMultipleObjectsMessage(
-      CMsgSOMultipleObjects & message, uint64_t steamId) {
-    message.set_version(InventoryVersion);
-    auto *owner = message.mutable_owner_soid();
-    owner->set_type(SoIdTypeSteamId);
-    owner->set_id(steamId);
-  }
-
-  /**
-   * Sends a multiple objects update to the client
-   *
-   * @param p2psocket The socket to send the message on
-   * @param message The prepared multiple objects message
-   * @return True if message was sent successfully
-   */
-  bool GCNetwork_Inventory::SendSOMultipleObjects(
-      SNetSocket_t p2psocket, const CMsgSOMultipleObjects &message) {
-    // Create a network message and send it
-    NetworkMessage responseMsg =
-        NetworkMessage::FromProto(message, k_EMsgGC_CC_GC2CL_SOMultipleObjects);
-
-    uint32_t totalModified = message.objects_modified_size();
-    uint32_t totalAdded = message.objects_added_size();
-    uint32_t totalRemoved = message.objects_removed_size();
-
-    logger::info("SendSOMultipleObjects: Sending update with %u modified, %u "
-                 "added, %u removed objects",
-                 totalModified, totalAdded, totalRemoved);
-    logger::info("SendSOMultipleObjects: Total message size: %u bytes",
-                 responseMsg.GetTotalSize());
-
-    bool success = responseMsg.WriteToSocket(p2psocket, true);
-    if (!success) {
-      logger::error(
-          "SendSOMultipleObjects: Failed to write message to socket - "
-          "client likely disconnected");
-    }
-
-    return success;
-  }
-
-  // DEFAULT ITEM HANDLING
-
-  /**
-   * Creates a base weapon item with default properties
-   *
-   * @param defIndex The definition index of the weapon to create
-   * @param steamId The steam ID of the owner
-   * @param inventory_db Database connection to save the item
-   * @param saveToDb Whether to save the item to the database immediately
-   * (default: true)
-   * @param customName Optional custom name for the weapon
-   * @return A pointer to the newly created CSOEconItem (caller is responsible
-   * for freeing memory) or nullptr if creation failed
-   */
-  std::unique_ptr<CSOEconItem> GCNetwork_Inventory::CreateBaseItem(
-      uint32_t defIndex, uint64_t steamId, MYSQL *inventory_db, bool saveToDb,
-      const std::string &customName) {
-    if (!g_itemSchema) {
-      logger::error("CreateBaseItem: ItemSchema is null");
-      return nullptr;
-    }
-
-    // Create the base item
-    auto item = std::make_unique<CSOEconItem>();
-
-    // Set basic properties
-    item->set_account_id(steamId & 0xFFFFFFFF);
-    item->set_def_index(defIndex);
-    item->set_inventory(0);
-    item->set_level(1);
-    item->set_quantity(1);
-    item->set_quality(ItemSchema::QualityNormal);
-    item->set_flags(0);
-    item->set_origin(kEconItemOrigin_Purchased);
-    item->set_rarity(ItemSchema::RarityDefault);
-
-    // Set custom name if provided
-    if (!customName.empty()) {
-      item->set_custom_name(customName);
-    }
-
-    // If saving to database is requested
-    if (saveToDb && inventory_db != nullptr) {
-      uint64_t newItemId = SaveNewItemToDatabase(
-          *item, steamId, inventory_db, true); // Pass true for isBaseWeapon
-      if (newItemId == 0) {
-        logger::error("CreateBaseItem: Failed to save base item to database "
-                      "(defIndex: %u)",
-                      defIndex);
-        return nullptr;
-      }
-
-      // Set the newly assigned ID
-      item->set_id(newItemId);
-      logger::info(
-          "CreateBaseItem: Created base item with defIndex %u, ID %llu "
-          "for player %llu",
-          defIndex, newItemId, steamId);
-    } else {
-      logger::info("CreateBaseItem: Created unsaved base item with defIndex %u "
-                   "for player %llu",
-                   defIndex, steamId);
-    }
-
-    return item;
-  }
-
-  bool GCNetwork_Inventory::IsDefaultItemId(uint64_t itemId, uint32_t &defIndex,
-                                            uint32_t &paintKitIndex) {
-    if ((itemId & ItemIdDefaultItemMask) == ItemIdDefaultItemMask) {
-      defIndex = itemId & 0xffff;
-      paintKitIndex = (itemId >> 16) & 0xffff;
-      return true;
     }
     return false;
   }
 
-  // EQUIPS
+  return true;
+}
 
-  /**
-   * Equips an item to a specific class (CT/T) and slot
-   * (this function is so fucked)
-   *
-   * @param p2psocket The socket to send updates to
-   * @param steamId The steam ID of the player
-   * @param itemId The ID of the item to equip
-   * @param classId The class ID to equip for (CLASS_CT or CLASS_T)
-   * @param slotId The slot ID to equip to
-   * @param inventory_db Database connection to update
-   * @return True if the item was successfully equipped
-   */
+//
+// ITEM UPDATES
+//
 
-  /**
-   * Sends an equipment update to the client
-   *
-   * @param p2psocket The socket to send updates to
-   * @param steamId The steam ID of the player
-   * @param itemId The ID of the item being equipped
-   * @param classId The class ID where the item is equipped
-   * @param slotId The slot ID where the item is equipped
-   * @param inventory_db Database connection
-   * @return True if update was sent successfully
-   */
+/**
+ * Deletes an item from the database and notifies the client
+ *
+ * @param p2psocket The socket to notify (optional)
+ * @param steamId The steam ID of the item's owner
+ * @param itemId The unique ID of the item to delete
+ * @param inventory_db Database connection to delete the item from
+ * @return True if the item was successfully deleted
+ */
+bool GCNetwork_Inventory::DeleteItem(SNetSocket_t p2psocket, uint64_t steamId,
+                                     uint64_t itemId, MYSQL *inventory_db) {
+  if (!inventory_db) {
+    logger::error("DeleteItem: Database connection is null");
+    return false;
+  }
 
-  /**
-   * Sends an unequip update to the client
-   *
-   * @param p2psocket The socket to send updates to
-   * @param steamId The steam ID of the player
-   * @param itemId The ID of the item being unequipped
-   * @param inventory_db Database connection
-   * @param was_equipped_ct Whether the item was equipped for CT
-   * @param was_equipped_t Whether the item was equipped for T
-   * @param def_index The definition index of the item
-   * @return True if update was sent successfully
-   */
+  // Fetch the item before deleting it, so we can send its information
+  auto item = FetchItemFromDatabase(itemId, steamId, inventory_db);
+  if (!item) {
+    logger::error(
+        "DeleteItem: Item %llu not found or doesn't belong to user %llu",
+        itemId, steamId);
+    return false;
+  }
 
-  // RENAMING ITEMS
+  // Delete from database - SQL injection safe using prepared statement
+  std::string steamId2 = GCNetwork_Users::SteamID64ToSteamID2(steamId);
 
-  // STICKERS
+  auto stmtOpt = createPreparedStatement(
+      inventory_db,
+      "DELETE FROM csgo_items WHERE id = ? AND owner_steamid2 = ?");
 
-  /**
-   * Handles scraping a sticker from an item
-   * If wear reaches max, removes the sticker entirely
-   *
-   * @param p2psocket The socket to send updates to
-   * @param steamId The steam ID of the player
-   * @param message The sticker scrape message
-   * @param inventory_db Database connection
-   * @return True if sticker was successfully scraped
-   */
+  if (!stmtOpt) {
+    logger::error("DeleteItem: Failed to prepare delete statement");
+    return false;
+  }
+
+  auto &stmt = *stmtOpt;
+  uint64_t itemIdParam = itemId;
+  unsigned long steamIdLen = steamId2.length();
+  stmt.bindUint64(0, &itemIdParam);
+  stmt.bindString(1, steamId2.c_str(), &steamIdLen);
+
+  if (!stmt.execute()) {
+    logger::error("DeleteItem: MySQL delete query failed: %s", stmt.error());
+    return false;
+  }
+
+  if (stmt.affectedRows() == 0) {
+    logger::warning("DeleteItem: No rows affected when deleting item %llu",
+                    itemId);
+    return false;
+  }
+
+  logger::info("DeleteItem: Successfully deleted item %llu from database",
+               itemId);
+
+  if (p2psocket != 0) {
+    logger::info("DeleteItem: Sending delete notification for item %llu to "
+                 "player %llu",
+                 itemId, steamId);
+
+    bool success = SendSOSingleObject(p2psocket, steamId, SOTypeItem, *item,
+                                      k_EMsgGC_CC_DeleteItem);
+    if (!success) {
+      logger::error("DeleteItem: Failed to send delete notification to client");
+      return false;
+    }
+  }
+
+  return true;
+}
+
+/**
+ * Sends a single object update to the client
+ *
+ * @param p2psocket The socket to send the message on
+ * @param steamId The steam ID of the player to update
+ * @param type_id The type of object being updated (e.g. SOTypeItem)
+ * @param object The protobuf object to send
+ * @param messageType The message type to use (defaults to
+ * k_EMsgGC_CC_GC2CL_SOSingleObject)
+ * @return True if message was sent successfully
+ */
+bool GCNetwork_Inventory::SendSOSingleObject(
+    SNetSocket_t p2psocket, uint64_t steamId, SOTypeId type,
+    const google::protobuf::MessageLite &object, uint32_t messageType) {
+  CMsgSOSingleObject message;
+
+  // Set the type ID
+  message.set_type_id(type);
+
+  // Serialize the object to binary and set as object_data
+  message.set_object_data(object.SerializeAsString());
+
+  // Set the version
+  message.set_version(InventoryVersion);
+
+  // Set the owner ID
+  auto *owner = message.mutable_owner_soid();
+  owner->set_type(SoIdTypeSteamId);
+  owner->set_id(steamId);
+
+  // Create a network message and send it
+  NetworkMessage responseMsg = NetworkMessage::FromProto(message, messageType);
+
+  logger::info("SendSOSingleObject: Sending object of type %d to %llu with "
+               "message type %u, size: %u bytes",
+               type, steamId, messageType, responseMsg.GetTotalSize());
+
+  bool success = responseMsg.WriteToSocket(p2psocket, true);
+  if (!success) {
+    logger::error("SendSOSingleObject: Failed to write message to socket - "
+                  "client likely disconnected");
+  }
+
+  return success;
+}
+
+/**
+ * Helper to add an object to a multiple objects message
+ *
+ * @param message The multiple objects message to add to
+ * @param type The type of object to add
+ * @param object The object to serialize and add
+ * @param collection Which collection to add to (added, modified, removed)
+ */
+void GCNetwork_Inventory::AddToMultipleObjectsMessage(
+    CMsgSOMultipleObjects &message, SOTypeId type,
+    const google::protobuf::MessageLite &object,
+    const std::string &collection) {
+  CMsgSOMultipleObjects::SingleObject *single;
+
+  if (collection == "added") {
+    single = message.add_objects_added();
+  } else if (collection == "removed") {
+    single = message.add_objects_removed();
+  } else {
+    // Default to "modified"
+    single = message.add_objects_modified();
+  }
+
+  single->set_type_id(type);
+  single->set_object_data(object.SerializeAsString());
+}
+
+/**
+ * Initialize a multiple objects message with owner ID and version
+ *
+ * @param message The message to initialize
+ * @param steamId The steam ID of the owner
+ */
+void GCNetwork_Inventory::InitMultipleObjectsMessage(
+    CMsgSOMultipleObjects &message, uint64_t steamId) {
+  message.set_version(InventoryVersion);
+  auto *owner = message.mutable_owner_soid();
+  owner->set_type(SoIdTypeSteamId);
+  owner->set_id(steamId);
+}
+
+/**
+ * Sends a multiple objects update to the client
+ *
+ * @param p2psocket The socket to send the message on
+ * @param message The prepared multiple objects message
+ * @return True if message was sent successfully
+ */
+bool GCNetwork_Inventory::SendSOMultipleObjects(
+    SNetSocket_t p2psocket, const CMsgSOMultipleObjects &message) {
+  // Create a network message and send it
+  NetworkMessage responseMsg =
+      NetworkMessage::FromProto(message, k_EMsgGC_CC_GC2CL_SOMultipleObjects);
+
+  uint32_t totalModified = message.objects_modified_size();
+  uint32_t totalAdded = message.objects_added_size();
+  uint32_t totalRemoved = message.objects_removed_size();
+
+  logger::info("SendSOMultipleObjects: Sending update with %u modified, %u "
+               "added, %u removed objects",
+               totalModified, totalAdded, totalRemoved);
+  logger::info("SendSOMultipleObjects: Total message size: %u bytes",
+               responseMsg.GetTotalSize());
+
+  bool success = responseMsg.WriteToSocket(p2psocket, true);
+  if (!success) {
+    logger::error("SendSOMultipleObjects: Failed to write message to socket - "
+                  "client likely disconnected");
+  }
+
+  return success;
+}
+
+// DEFAULT ITEM HANDLING
+
+/**
+ * Creates a base weapon item with default properties
+ *
+ * @param defIndex The definition index of the weapon to create
+ * @param steamId The steam ID of the owner
+ * @param inventory_db Database connection to save the item
+ * @param saveToDb Whether to save the item to the database immediately
+ * (default: true)
+ * @param customName Optional custom name for the weapon
+ * @return A pointer to the newly created CSOEconItem (caller is responsible
+ * for freeing memory) or nullptr if creation failed
+ */
+std::unique_ptr<CSOEconItem>
+GCNetwork_Inventory::CreateBaseItem(uint32_t defIndex, uint64_t steamId,
+                                    MYSQL *inventory_db, bool saveToDb,
+                                    const std::string &customName) {
+  if (!g_itemSchema) {
+    logger::error("CreateBaseItem: ItemSchema is null");
+    return nullptr;
+  }
+
+  // Create the base item
+  auto item = std::make_unique<CSOEconItem>();
+
+  // Set basic properties
+  item->set_account_id(steamId & 0xFFFFFFFF);
+  item->set_def_index(defIndex);
+  item->set_inventory(0);
+  item->set_level(1);
+  item->set_quantity(1);
+  item->set_quality(ItemSchema::QualityNormal);
+  item->set_flags(0);
+  item->set_origin(kEconItemOrigin_Purchased);
+  item->set_rarity(ItemSchema::RarityDefault);
+
+  // Set custom name if provided
+  if (!customName.empty()) {
+    item->set_custom_name(customName);
+  }
+
+  // If saving to database is requested
+  if (saveToDb && inventory_db != nullptr) {
+    uint64_t newItemId = SaveNewItemToDatabase(
+        *item, steamId, inventory_db, true); // Pass true for isBaseWeapon
+    if (newItemId == 0) {
+      logger::error("CreateBaseItem: Failed to save base item to database "
+                    "(defIndex: %u)",
+                    defIndex);
+      return nullptr;
+    }
+
+    // Set the newly assigned ID
+    item->set_id(newItemId);
+    logger::info("CreateBaseItem: Created base item with defIndex %u, ID %llu "
+                 "for player %llu",
+                 defIndex, newItemId, steamId);
+  } else {
+    logger::info("CreateBaseItem: Created unsaved base item with defIndex %u "
+                 "for player %llu",
+                 defIndex, steamId);
+  }
+
+  return item;
+}
+
+bool GCNetwork_Inventory::IsDefaultItemId(uint64_t itemId, uint32_t &defIndex,
+                                          uint32_t &paintKitIndex) {
+  if ((itemId & ItemIdDefaultItemMask) == ItemIdDefaultItemMask) {
+    defIndex = itemId & 0xffff;
+    paintKitIndex = (itemId >> 16) & 0xffff;
+    return true;
+  }
+  return false;
+}
+
+// EQUIPS
+
+/**
+ * Equips an item to a specific class (CT/T) and slot
+ * (this function is so fucked)
+ *
+ * @param p2psocket The socket to send updates to
+ * @param steamId The steam ID of the player
+ * @param itemId The ID of the item to equip
+ * @param classId The class ID to equip for (CLASS_CT or CLASS_T)
+ * @param slotId The slot ID to equip to
+ * @param inventory_db Database connection to update
+ * @return True if the item was successfully equipped
+ */
+
+/**
+ * Sends an equipment update to the client
+ *
+ * @param p2psocket The socket to send updates to
+ * @param steamId The steam ID of the player
+ * @param itemId The ID of the item being equipped
+ * @param classId The class ID where the item is equipped
+ * @param slotId The slot ID where the item is equipped
+ * @param inventory_db Database connection
+ * @return True if update was sent successfully
+ */
+
+/**
+ * Sends an unequip update to the client
+ *
+ * @param p2psocket The socket to send updates to
+ * @param steamId The steam ID of the player
+ * @param itemId The ID of the item being unequipped
+ * @param inventory_db Database connection
+ * @param was_equipped_ct Whether the item was equipped for CT
+ * @param was_equipped_t Whether the item was equipped for T
+ * @param def_index The definition index of the item
+ * @return True if update was sent successfully
+ */
+
+// RENAMING ITEMS
+
+// STICKERS
+
+/**
+ * Handles scraping a sticker from an item
+ * If wear reaches max, removes the sticker entirely
+ *
+ * @param p2psocket The socket to send updates to
+ * @param steamId The steam ID of the player
+ * @param message The sticker scrape message
+ * @param inventory_db Database connection
+ * @return True if sticker was successfully scraped
+ */
