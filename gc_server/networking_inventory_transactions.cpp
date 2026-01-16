@@ -232,8 +232,21 @@ bool GCNetwork_Inventory::HandleUnboxCrate(SNetSocket_t p2psocket,
   }
 
   // Send the unlock response to complete the animation
-  bool unlockSuccess = SendSOSingleObject(p2psocket, steamId, SOTypeItem,
-                                          newItem, k_EMsgGCUnlockCrateResponse);
+  CMsgGC_CC_GC2CL_UnlockCrateResponse response;
+  response.set_result(1); // 1 = OK
+  response.set_item_id(newItemId);
+  response.set_def_index(newItem.def_index());
+  response.set_paint_index(
+      newItem.attribute(0).def_index() == ATTR_PAINT_INDEX
+          ? newItem.attribute(0).value_bytes()[0]
+          : 0); // Simplification, server might not need this?
+  // Let's stick to minimal fields first: result and item_id are usually
+  // critical.
+
+  NetworkMessage netMsg =
+      NetworkMessage::FromProto(response, k_EMsgGCUnlockCrateResponse);
+  bool unlockSuccess = netMsg.WriteToSocket(p2psocket, true);
+
   if (!unlockSuccess) {
     logger::error("HandleUnboxCrate: Failed to send unlock response");
   } else {
