@@ -1718,7 +1718,7 @@ int GCNetwork_Inventory::ProcessClientAcknowledgment(
   auto stmtOpt = createPreparedStatement(
       inventory_db, "UPDATE csgo_items SET acknowledged = ? "
                     "WHERE id = ? AND owner_steamid2 = ? AND (acknowledged = 0 "
-                    "OR acknowledged IS NULL)");
+                    "OR acknowledged IS NULL OR acknowledged >= 1073741824)");
 
   if (!stmtOpt) {
     logger::error("ProcessClientAcknowledgment: Failed to prepare statement");
@@ -2173,7 +2173,8 @@ uint64_t GCNetwork_Inventory::SaveNewItemToDatabase(const CSOEconItem &item,
   stmt.bindUint32(29, &zeroVal); // equipped_ct
   stmt.bindUint32(30, &zeroVal); // equipped_t
   stmt.bindString(31, acquiredBy.c_str(), &acquiredByLen);
-  stmt.bindUint32(32, &zeroVal); // acknowledged
+  uint32_t inventoryVal = item.inventory();
+  stmt.bindUint32(32, &inventoryVal); // acknowledged/inventory
 
   if (!stmt.execute()) {
     logger::error("SaveNewItemToDatabase: MySQL query failed: %s",

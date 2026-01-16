@@ -177,34 +177,16 @@ bool GCNetwork_Inventory::HandleUnboxCrate(SNetSocket_t p2psocket,
 
   newItem.set_account_id(steamId & 0xFFFFFFFF);
 
-  // Get next available inventory position for immediate display
-  uint32_t inventoryPosition = GetNextInventoryPosition(steamId, inventory_db);
-  newItem.set_inventory(inventoryPosition);
+  // We do NOT set a specific inventory position yet.
+  // The item is created in 'Unacknowledged' state (handled by
+  // SelectItemFromCrate). The client will display the unboxing animation, then
+  // send an acknowledgment. ProcessClientAcknowledgment will then assign a real
+  // inventory slot.
 
   uint64_t newItemId = SaveNewItemToDatabase(newItem, steamId, inventory_db);
   if (newItemId == 0) {
     logger::error("HandleUnboxCrate: Failed to save new item to database");
     return false;
-  }
-
-  // Update the database with the inventory position - SQL injection safe
-  auto stmtOpt = createPreparedStatement(
-      inventory_db, "UPDATE csgo_items SET acknowledged = ? WHERE id = ?");
-
-  if (!stmtOpt) {
-    logger::error("HandleUnboxCrate: Failed to prepare position update");
-  } else {
-    auto &stmt = *stmtOpt;
-    uint32_t posParam = inventoryPosition;
-    uint64_t idParam = newItemId;
-    stmt.bindUint32(0, &posParam);
-    stmt.bindUint64(1, &idParam);
-
-    if (!stmt.execute()) {
-      logger::warning(
-          "HandleUnboxCrate: Failed to update inventory position: %s",
-          stmt.error());
-    }
   }
 
   // setting id to newest
