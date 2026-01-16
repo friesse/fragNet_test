@@ -221,12 +221,10 @@ void ProductionMatchmaker::SendMatchFoundToPlayers(PendingMatch* match) {
     logger::info("Sending match found messages to %zu players for match %s", 
                 match->players.size(), match->match_id.c_str());
     
-    // TODO: Integrate with GCNetwork_Matchmaking::SendMatchFound
-    // The existing API expects (SNetSocket_t socket, const Match &match, uint64_t steamId)
-    // but we don't have a Match object here, only PendingMatch
     for (uint64_t steamid : match->players) {
-        logger::info("  - Would notify player %llu about match on %s:%d", 
-                    steamid, match->allocated_server->ip.c_str(), match->allocated_server->port);
+        // Send match found message via networking system
+        GCNetwork_Matchmaking::SendMatchFound(steamid, match->allocated_server->ip, 
+                                            match->allocated_server->port, match->match_id);
     }
 }
 
@@ -295,10 +293,8 @@ void ProductionMatchmaker::StartMatch(PendingMatch* match) {
     SendRCONCommand(server, "changelevel de_dust2");
     
     // Send final connect info to all players
-    // TODO: Implement SendMatchReady or use existing API
     for (uint64_t steamid : match->players) {
-        logger::info("  - Player %llu should connect to %s:%d", 
-                    steamid, server->ip.c_str(), server->port);
+        GCNetwork_Matchmaking::SendMatchReady(steamid, server->ip, server->port, "");
     }
     
     // Remove from pending matches
@@ -317,9 +313,8 @@ void ProductionMatchmaker::CancelMatch(PendingMatch* match) {
     ReleaseServer(match->allocated_server);
     
     // Notify players that match was cancelled
-    // TODO: Implement SendMatchCancelled or use existing API
     for (uint64_t steamid : match->players) {
-        logger::info("  - Notifying player %llu that match was cancelled", steamid);
+        GCNetwork_Matchmaking::SendMatchCancelled(steamid);
         
         // Re-queue players who accepted
         if (match->player_responses[steamid]) {
