@@ -774,6 +774,10 @@ bool GCNetwork_Inventory::HandleCraft(SNetSocket_t p2psocket, uint64_t steamId,
   }
 
   // B. Insert Output Item
+  // Set origin to Crafted (8) so CheckAndSendNewItemsSince doesn't skip it
+  // (treating 0 as "from crate" which implies already handled)
+  resultItem.set_origin(8);
+
   uint64_t newId = SaveNewItemToDatabase(resultItem, steamId, inventory_db);
   if (newId == 0) {
     logger::error("HandleCraft: Failed to save result item");

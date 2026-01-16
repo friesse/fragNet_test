@@ -1912,6 +1912,9 @@ uint64_t GCNetwork_Inventory::SaveNewItemToDatabase(const CSOEconItem &item,
   bool tradable = isBaseItem ? false : true; // Set to 0 for base items
   std::string acquiredBy =
       isBaseItem ? "default" : "0"; // Set to "default" for base items
+  if (item.has_origin()) {
+    acquiredBy = std::to_string(item.origin());
+  }
 
   std::string itemName = "";
   std::string weaponType = "";
