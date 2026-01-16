@@ -1523,13 +1523,14 @@ bool GCNetwork_Inventory::CheckAndSendNewItemsSince(SNetSocket_t p2psocket,
     auto item = CreateItemFromDatabaseRow(steamId, (MYSQL_ROW)row_data);
     if (item) {
       bool isFromCrate = (acquired_by_buf && strcmp(acquired_by_buf, "0") == 0);
+      bool isCrafted = (acquired_by_buf && strcmp(acquired_by_buf, "8") == 0);
 
-      if (isFromCrate) {
-        // Item from crate opening - skip sending it here since it was already
-        // sent in HandleUnboxCrate
+      if (isFromCrate || isCrafted) {
+        // Item from crate or craft - skip sending it here since it was already
+        // sent in HandleUnboxCrate or HandleCraft response
         logger::info("CheckAndSendNewItemsSince: Skipping item %llu with "
-                     "acquired_by='0' (already sent as UnlockCrateResponse)",
-                     item->id());
+                     "acquired_by='%s' (already sent in specific response)",
+                     item->id(), acquired_by_buf ? acquired_by_buf : "null");
 
         // For gift types, we need to update acquired_by - SQL injection safe
         auto updateStmtOpt = createPreparedStatement(

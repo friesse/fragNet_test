@@ -797,8 +797,10 @@ bool GCNetwork_Inventory::HandleCraft(SNetSocket_t p2psocket, uint64_t steamId,
   response.set_response_code(0); // Success?
 
   // Add the item object for the reveal animation
-  SendSOSingleObject(p2psocket, steamId, SOTypeItem, resultItem,
-                     k_EMsgGC_CC_GC2CL_SOSingleObject);
+  // (Previously sent explicitly, now solely inside CraftResponse to prevent
+  // double-send confusion)
+  // SendSOSingleObject(p2psocket, steamId, SOTypeItem, resultItem,
+  //                    k_EMsgGC_CC_GC2CL_SOSingleObject);
 
   // Wait, standard craft response also has item_object field?
   // Logic: Send SOSingleObject separately so client gets the item "update",
