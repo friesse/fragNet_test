@@ -232,10 +232,10 @@ bool GCNetwork_Inventory::HandleUnboxCrate(SNetSocket_t p2psocket,
   }
 
   // Send destroy msg for crate
-  CSOEconItem crateItem;
-  crateItem.set_id(crateItemId);
+  CSOEconItem crateDestroyItem;
+  crateDestroyItem.set_id(crateItemId);
   bool destroySuccess =
-      SendSOSingleObject(p2psocket, steamId, SOTypeItem, crateItem,
+      SendSOSingleObject(p2psocket, steamId, SOTypeItem, crateDestroyItem,
                          k_ESOMsg_Destroy | ProtobufMask);
   if (!destroySuccess) {
     logger::error("HandleUnboxCrate: Failed to send destroy crate message");
