@@ -433,11 +433,16 @@ bool ItemSchema::EconItemFromLootListItem(const LootListItem &lootListItem,
     CSOEconItemAttribute *attribute = item.add_attribute();
     attribute->set_def_index(AttributeMusicId);
     SetAttributeUint32(attribute, lootListItem.musicDefinitionInfo->m_defIndex);
-  } else if (lootListItem.type == LootListItemPaintable) {
+  }
+
+  // Always check for paint kit info, regardless of specific loot list type
+  // (Items can be both "Item" type AND have a paint kit in this schema)
+  if (lootListItem.paintKitInfo) {
     const PaintKitInfo *paintKitInfo = lootListItem.paintKitInfo;
 
     CSOEconItemAttribute *attribute = item.add_attribute();
     attribute->set_def_index(AttributeTexturePrefab);
+    // Attribute 6 is paint index (AttributeTexturePrefab/AttributePaintIndex)
     SetAttributeUint32(attribute, paintKitInfo->m_defIndex);
 
     attribute = item.add_attribute();
