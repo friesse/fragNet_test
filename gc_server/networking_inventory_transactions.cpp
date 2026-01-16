@@ -234,14 +234,14 @@ bool GCNetwork_Inventory::HandleUnboxCrate(SNetSocket_t p2psocket,
   // Send destroy msg for crate
   CSOEconItem crateDestroyItem;
   crateDestroyItem.set_id(crateItemId);
-  bool destroySuccess =
-      SendSOSingleObject(p2psocket, steamId, SOTypeItem, crateDestroyItem,
-                         k_ESOMsg_Destroy | ProtobufMask);
+  bool destroySuccess = SendSOSingleObject(
+      p2psocket, steamId, SOTypeItem, crateDestroyItem, k_EMsgGC_CC_DeleteItem);
   if (!destroySuccess) {
     logger::error("HandleUnboxCrate: Failed to send destroy crate message");
   } else {
-    logger::info("HandleUnboxCrate: Sent k_ESOMsg_Destroy (%u) for crate %llu",
-                 k_ESOMsg_Destroy, crateItemId);
+    logger::info(
+        "HandleUnboxCrate: Sent k_EMsgGC_CC_DeleteItem (%u) for crate %llu",
+        k_EMsgGC_CC_DeleteItem, crateItemId);
   }
 
   // Send the unlock response to complete the animation
