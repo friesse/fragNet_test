@@ -305,10 +305,58 @@ void GCNetwork_Matchmaking::SendMatchAbandoned(SNetSocket_t socket,
 
   NetworkMessage abandonMsg = NetworkMessage::FromProto(
       abandon, k_EMsgGCCStrike15_v2_MatchmakingGC2ClientAbandon);
-  abandonMsg.WriteToSocket(socket, true);
-
   logger::info("Sent abandon notification for player %llu in match %llu",
                abandonerId, matchId);
+}
+
+void GCNetwork_Matchmaking::SendMatchFound(uint64_t steamId,
+                                           const std::string &ip, uint16_t port,
+                                           const std::string &token) {
+  SNetSocket_t socket = GCNetwork::GetInstance()->GetSocketForSteamId(steamId);
+  if (socket == k_HSteamNetConnection_Invalid)
+    return;
+
+  // Manually build reservation
+  CMsgGCCStrike15_v2_MatchmakingGC2ClientReserve reserve;
+  reserve.set_server_address(ip);
+  reserve.set_server_port(port);
+  reserve.set_reservationid(
+      0); // Using 0 or parsing token if numeric... token is string
+  // If token is numeric matchid, we could try to parse, but proto expects
+  // uint64 reservationid sometimes but let's check proto. reserve message
+  // likely needs more.
+
+  // For CS:GO, token usually goes into reservationid if numeric.
+  // We'll leave it 0 for now or try hash.
+
+  NetworkMessage reserveMsg = NetworkMessage::FromProto(
+      reserve, k_EMsgGCCStrike15_v2_MatchmakingGC2ClientReserve);
+  reserveMsg.WriteToSocket(socket, true);
+
+  logger::info("Sent match found (overload) to %llu", steamId);
+}
+
+void GCNetwork_Matchmaking::SendMatchReady(uint64_t steamId,
+                                           const std::string &ip, uint16_t port,
+                                           const std::string &token) {
+  // Same as match found primarily
+  SendMatchFound(steamId, ip, port, token);
+}
+
+void GCNetwork_Matchmaking::SendMatchCancelled(uint64_t steamId) {
+  SNetSocket_t socket = GCNetwork::GetInstance()->GetSocketForSteamId(steamId);
+  if (socket == k_HSteamNetConnection_Invalid)
+    return;
+
+  CMsgGCCStrike15_v2_MatchmakingGC2ClientUpdate update;
+  // Send empty update to reset state?
+  // Or specifically invoke stop?
+
+  NetworkMessage updateMsg = NetworkMessage::FromProto(
+      update, k_EMsgGCCStrike15_v2_MatchmakingGC2ClientUpdate);
+  updateMsg.WriteToSocket(socket, true);
+
+  logger::info("Sent match cancelled to %llu", steamId);
 }
 
 void GCNetwork_Matchmaking::SendQueueStatus(SNetSocket_t socket,

@@ -98,6 +98,13 @@ public:
   // client sessions
   void CleanupSessions();
   void CheckNewItemsForActiveSessions();
+
+  // Singleton access
+  static GCNetwork *GetInstance();
+  SNetSocket_t GetSocketForSteamId(uint64_t steamId);
+
+private:
+  static GCNetwork *s_pInstance;
 };
 
 #endif

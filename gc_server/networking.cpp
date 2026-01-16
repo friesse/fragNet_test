@@ -18,6 +18,17 @@ void ip_to_str(char *ip, int ipsize, uint32_t uip) {
 }
 
 SNetListenSocket_t listen_socket;
+GCNetwork *GCNetwork::s_pInstance = nullptr;
+
+GCNetwork *GCNetwork::GetInstance() { return s_pInstance; }
+
+SNetSocket_t GCNetwork::GetSocketForSteamId(uint64_t steamId) {
+  std::shared_lock<std::shared_mutex> lock(m_sessionsMutex);
+  if (m_activeSessions.find(steamId) != m_activeSessions.end()) {
+    return m_activeSessions.at(steamId).socket;
+  }
+  return k_HSteamNetConnection_Invalid;
+}
 
 GCNetwork::GCNetwork()
     : m_SocketStatusCallback(), m_mysql1(NULL), m_mysql2(NULL), m_mysql3(NULL) {
@@ -26,11 +37,14 @@ GCNetwork::GCNetwork()
         "Failed to initialize inventory system in GCNetwork constructor");
   }
 
+  s_pInstance = this;
+
   m_matchmakingManager = nullptr;
   logger::info("MatchmakingManager disabled - not initialized");
 }
 
 GCNetwork::~GCNetwork() {
+  s_pInstance = nullptr;
   GCNetwork_Inventory::Cleanup();
 
   // Cleanup matchmaking manager

@@ -41,6 +41,14 @@ public:
   // Helper functions
   static void SendMatchFound(SNetSocket_t socket, const Match &match,
                              uint64_t steamId);
+  static void SendMatchFound(uint64_t steamId, const std::string &ip,
+                             uint16_t port, const std::string &token);
+
+  static void SendMatchReady(uint64_t steamId, const std::string &ip,
+                             uint16_t port, const std::string &token);
+
+  static void SendMatchCancelled(uint64_t steamId);
+
   static void SendMatchUpdate(SNetSocket_t socket, const Match &match);
   static void SendMatchAbandoned(SNetSocket_t socket, uint64_t matchId,
                                  uint64_t abandonerId);
