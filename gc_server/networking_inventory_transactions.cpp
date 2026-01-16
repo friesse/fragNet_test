@@ -231,6 +231,19 @@ bool GCNetwork_Inventory::HandleUnboxCrate(SNetSocket_t p2psocket,
                  newItemId);
   }
 
+  // Send destroy msg for crate
+  CSOEconItem crateItem;
+  crateItem.set_id(crateItemId);
+  bool destroySuccess =
+      SendSOSingleObject(p2psocket, steamId, SOTypeItem, crateItem,
+                         k_ESOMsg_Destroy | ProtobufMask);
+  if (!destroySuccess) {
+    logger::error("HandleUnboxCrate: Failed to send destroy crate message");
+  } else {
+    logger::info("HandleUnboxCrate: Sent k_ESOMsg_Destroy (%u) for crate %llu",
+                 k_ESOMsg_Destroy, crateItemId);
+  }
+
   // Send the unlock response to complete the animation
   // Send the unlock response to complete the animation
   // The client expects k_EMsgGC_CC_GC2CL_UnlockCrateResponse (1061), which uses
