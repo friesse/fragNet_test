@@ -463,15 +463,9 @@ bool ItemSchema::EconItemFromLootListItem(const LootListItem &lootListItem,
     SetAttributeFloat(attribute, g_random.Float(paintKitInfo->m_minFloat,
                                                 paintKitInfo->m_maxFloat));
   } else {
-    logger::warn("EconItemFromLootListItem: No PaintKitInfo found for Item Def "
+    logger::info("EconItemFromLootListItem: No PaintKitInfo found for Item Def "
                  "%d (Type: %d)",
                  lootListItem.itemInfo->m_defIndex, lootListItem.type);
-  }
-  else if (lootListItem.type == LootListItemNoAttribute) {
-    // nothing
-  }
-  else {
-    // assert(false);
   }
 
   if (statTrak) {
