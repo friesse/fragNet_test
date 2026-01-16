@@ -232,7 +232,7 @@ bool GCNetwork_Inventory::HandleUnboxCrate(SNetSocket_t p2psocket,
   }
 
   // Send the unlock response to complete the animation
-  CMsgGC_CC_GC2CL_UnlockCrateResponse response;
+  CMsgGCUnlockCrateResponse response;
   response.set_result(1); // 1 = OK
   response.set_item_id(newItemId);
   response.set_def_index(newItem.def_index());
