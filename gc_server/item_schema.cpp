@@ -1468,24 +1468,22 @@ const LootList *ItemSchema::FindCollectionForItem(uint32_t defIndex,
   // For production with thousands of simultaneous crafts, this should be
   // cached. For this server, it's fine.
 
-  for (const auto &[name, list] : m_lootLists) {
-    if (name.find("crate_") == 0) {
-      // Skip "crate_" lists to ensure we find the underlying "set_" or
-      // "collection_" first. Crates often contain the collection plus other
-      // items (knives/gloves) we don't want in Trade Up logic.
-      continue;
-    }
+  const LootList *fallback = nullptr;
 
+  for (const auto &[name, list] : m_lootLists) {
     if (IsItemInLootList(list, defIndex, pkId)) {
-      return &list;
+      if (name.find("crate_") != 0) {
+        // High confidence match (likely set_ or collection_)
+        return &list;
+      }
+      // Possible match, but might be a crate wrapper (keep looking for better)
+      if (!fallback) {
+        fallback = &list;
+      }
     }
   }
 
-  // If we found nothing in collections/sets, check crates as fallback?
-  // Actually, some items might ONLY be in a crate definition if schema is
-  // weird. But for Trade Up, we strictly want collections. If we fail here, the
-  // Trade Up fails safely.
-  return nullptr;
+  return fallback;
 }
 
 static void
