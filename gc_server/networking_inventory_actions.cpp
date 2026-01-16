@@ -785,44 +785,51 @@ bool GCNetwork_Inventory::HandleCraft(SNetSocket_t p2psocket, uint64_t steamId,
   }
   resultItem.set_id(newId);
 
-  // C. Commit
+  // 5. Commit Transaction FIRST
+  // Critical: We must commit before sending ANY messages to the client.
+  // If we send messages first, the client might try to use the item (e.g.
+  // equip) before the DB transaction is visible, causing "Item not found"
+  // errors.
   if (!transaction.Commit()) {
     logger::error("HandleCraft: Transaction commit failed");
     return false;
   }
 
-  // 5. Send Response
+  // 6. Send Notifications to Client
+  // A. Send Delete messages for inputs
+  // The client needs explicit instruction to remove the ingredients from the UI
+  // immediately.
+  CSOEconItem destroyItem;
+  for (const auto &input : inputItems) {
+    destroyItem.set_id(input->id());
+    // k_EMsgGC_CC_DeleteItem = 1063
+    SendSOSingleObject(p2psocket, steamId, SOTypeItem, destroyItem, 1063);
+  }
+
+  // B. Send Create message for new item
+  // We MUST send this explicitly so the client knows about the new item.
+  // Using k_ESOMsg_Create (21) | ProtobufMask to match HandleUnboxCrate
+  // behavior.
+  uint32_t createMsg = k_ESOMsg_Create | ProtobufMask;
+  SendSOSingleObject(p2psocket, steamId, SOTypeItem, resultItem, createMsg);
+
+  // C. Send Craft Response
   CMsgGC_CC_GC2CL_CraftResponse response;
   response.set_response_index(message.recipe_defindex());
-  response.set_response_code(0); // Success?
-
-  // Add the item object for the reveal animation
-  // (Previously sent explicitly, now solely inside CraftResponse to prevent
-  // double-send confusion)
-  // SendSOSingleObject(p2psocket, steamId, SOTypeItem, resultItem,
-  //                    k_EMsgGC_CC_GC2CL_SOSingleObject);
-
-  // Wait, standard craft response also has item_object field?
-  // Logic: Send SOSingleObject separately so client gets the item "update",
-  // AND include it in response for the specific "Trade Up" UI event?
-  // Let's check proto again. Yes, field 3 is item_object.
-  // We should populate it directly in the response too.
+  response.set_response_code(0); // Success
 
   auto *so = response.mutable_item_object();
   so->set_type_id(SOTypeItem);
-  // Manual serialization of object... generic CMsgSOSingleObject expects
-  // object_data as bytes
   std::string itemBytes = resultItem.SerializeAsString();
   so->set_object_data(itemBytes.data(), itemBytes.size());
 
-  // Send the specific response message
   NetworkMessage netMsg =
       NetworkMessage::FromProto(response, k_EMsgGC_CC_GC2CL_CraftResponse);
   netMsg.WriteToSocket(p2psocket, true);
 
   logger::info("HandleCraft: User %llu successfully traded up to Item %llu "
                "(Def %u)",
-               steamId, newId, resultItem.def_index());
+               steamId, resultItem.id(), resultItem.def_index());
 
   return true;
 }
