@@ -440,23 +440,37 @@ bool ItemSchema::EconItemFromLootListItem(const LootListItem &lootListItem,
   if (lootListItem.paintKitInfo) {
     const PaintKitInfo *paintKitInfo = lootListItem.paintKitInfo;
 
+    logger::info(
+        "EconItemFromLootListItem: Applying PaintKit %d to Item Def %d",
+        paintKitInfo->m_defIndex, item.def_index());
+
     CSOEconItemAttribute *attribute = item.add_attribute();
     attribute->set_def_index(AttributeTexturePrefab);
     // Attribute 6 is paint index (AttributeTexturePrefab/AttributePaintIndex)
-    SetAttributeUint32(attribute, paintKitInfo->m_defIndex);
+    // CRITICAL FIX: This MUST be a float. Using SetAttributeUint32 writes int
+    // bytes, which the client reads as a denormal float (approx 0.0), resulting
+    // in default skin.
+    SetAttributeFloat(attribute, (float)paintKitInfo->m_defIndex);
 
     attribute = item.add_attribute();
     attribute->set_def_index(AttributeTextureSeed);
-    SetAttributeUint32(attribute, g_random.Uint32(0, 1000));
+    // Seed is also a float in the schema.
+    SetAttributeFloat(attribute, (float)g_random.Uint32(0, 1000));
 
     // mikkotodo how does the float distribution work?
     attribute = item.add_attribute();
     attribute->set_def_index(AttributeTextureWear);
     SetAttributeFloat(attribute, g_random.Float(paintKitInfo->m_minFloat,
                                                 paintKitInfo->m_maxFloat));
-  } else if (lootListItem.type == LootListItemNoAttribute) {
-    // nothing
   } else {
+    logger::warn("EconItemFromLootListItem: No PaintKitInfo found for Item Def "
+                 "%d (Type: %d)",
+                 lootListItem.itemInfo->m_defIndex, lootListItem.type);
+  }
+  else if (lootListItem.type == LootListItemNoAttribute) {
+    // nothing
+  }
+  else {
     // assert(false);
   }
 
