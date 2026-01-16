@@ -318,10 +318,10 @@ void GCNetwork_Matchmaking::SendMatchFound(uint64_t steamId,
 
   // Manually build reservation
   CMsgGCCStrike15_v2_MatchmakingGC2ClientReserve reserve;
-  reserve.set_server_address(ip);
-  reserve.set_server_port(port);
-  reserve.set_reservationid(
-      0); // Using 0 or parsing token if numeric... token is string
+  std::string connectAddr = ip + ":" + std::to_string(port);
+  reserve.set_server_address(connectAddr);
+  reserve.set_direct_udp_port(port);
+  reserve.set_reservationid(0); // Using 0 for now
   // If token is numeric matchid, we could try to parse, but proto expects
   // uint64 reservationid sometimes but let's check proto. reserve message
   // likely needs more.
