@@ -43,10 +43,6 @@ bool GCNetwork_Inventory::SendEquipUpdate(SNetSocket_t p2psocket,
       uint64_t idParam = itemId;
       stmt.bindUint64(0, &idParam);
 
-      auto &stmt = *stmtOpt;
-      uint64_t idParam = itemId;
-      stmt.bindUint64(0, &idParam);
-
       if (stmt.execute() && stmt.storeResult() && stmt.fetch() == 0) {
         // Get item_id string
         char buf[256];
@@ -806,7 +802,7 @@ bool GCNetwork_Inventory::HandleCraft(SNetSocket_t p2psocket, uint64_t steamId,
   // Let's check proto again. Yes, field 3 is item_object.
   // We should populate it directly in the response too.
 
-  CMsgSOSingleObject *so = response.mutable_item_object();
+  auto *so = response.mutable_item_object();
   so->set_type_id(SOTypeItem);
   // Manual serialization of object... generic CMsgSOSingleObject expects
   // object_data as bytes
