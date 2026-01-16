@@ -1728,48 +1728,6 @@ int GCNetwork_Inventory::ProcessClientAcknowledgment(
 
   auto &stmt = *stmtOpt;
 
-  for (int i = 0; i < message.item_id_size(); i++) {
-    uint64_t itemId = message.item_id(i);
-
-    // DEBUG: Inspect item state before update
-    {
-      auto debugStmtOpt = createPreparedStatement(
-          inventory_db,
-          "SELECT owner_steamid2, acknowledged FROM csgo_items WHERE id = ?");
-      if (debugStmtOpt) {
-        auto &debugStmt = *debugStmtOpt;
-        debugStmt.bindUint64(0, &itemId);
-        if (debugStmt.execute() && debugStmt.storeResult()) {
-          char dbSteamId[64];
-          dbSteamId[0] = 0;
-          uint64_t dbAck = 0; // Use uint64 to catch large values
-          my_bool dbAckNull = false;
-          unsigned long dbSteamIdLen = 0;
-
-          MYSQL_BIND resBind[2];
-          memset(resBind, 0, sizeof(resBind));
-          resBind[0].buffer_type = MYSQL_TYPE_STRING;
-          resBind[0].buffer = dbSteamId;
-          resBind[0].buffer_length = sizeof(dbSteamId);
-          resBind[0].length = &dbSteamIdLen;
-
-          resBind[1].buffer_type = MYSQL_TYPE_LONGLONG;
-          resBind[1].buffer = &dbAck;
-          resBind[1].is_null = &dbAckNull;
-
-          if (debugStmt.bindResult(resBind) && debugStmt.fetch() == 0) {
-            logger::info("DEBUG Acknowledge Item %llu: DB_SteamID='%s', "
-                         "DB_Ack=%llu (Null=%d), Target_Stack_SteamID='%s'",
-                         itemId, dbSteamId, dbAck, dbAckNull, steamId2.c_str());
-          } else {
-            logger::warning("DEBUG Acknowledge Item %llu: Item NOT FOUND in DB",
-                            itemId);
-          }
-        }
-      }
-    }
-  }
-
   // loop over all items to acknowledge
   for (int i = 0; i < message.item_id_size(); i++) {
     uint64_t itemId = message.item_id(i);

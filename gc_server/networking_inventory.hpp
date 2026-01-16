@@ -132,6 +132,11 @@ public:
                        MYSQL *inventory_db, uint64_t &txnId,
                        std::vector<uint64_t> &itemIds);
 
+  // Trade Contract
+  static bool HandleCraft(SNetSocket_t p2psocket, uint64_t steamId,
+                          const CMsgGC_CC_CL2GC_Craft &message,
+                          MYSQL *inventory_db);
+
   // ATTRIBUTE HELPERS
   static void AddFloatAttribute(CSOEconItem *item, uint32_t defIndex,
                                 float value) {

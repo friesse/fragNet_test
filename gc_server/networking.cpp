@@ -621,6 +621,23 @@ void GCNetwork::Update() {
       }
       break;
 
+    case k_EMsgGC_CC_CL2GC_Craft:
+      logger::info("Received Craft request");
+      {
+        NetworkMessage netMsg(buffer.data(), msgsize);
+        CMsgGC_CC_CL2GC_Craft request;
+        if (netMsg.ParseTo(&request)) {
+          uint64_t steamId = GetSessionSteamId(p2psocket);
+          if (steamId != 0) {
+            GCNetwork_Inventory::HandleCraft(p2psocket, steamId, request,
+                                             m_mysql2);
+          } else {
+            logger::error("Craft: No valid session for this socket");
+          }
+        }
+      }
+      break;
+
     case k_EMsgGC_CC_CL2GC_ApplySticker:
       logger::info("Received ApplySticker request");
       {

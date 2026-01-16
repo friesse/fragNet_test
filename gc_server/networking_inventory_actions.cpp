@@ -43,6 +43,10 @@ bool GCNetwork_Inventory::SendEquipUpdate(SNetSocket_t p2psocket,
       uint64_t idParam = itemId;
       stmt.bindUint64(0, &idParam);
 
+      auto &stmt = *stmtOpt;
+      uint64_t idParam = itemId;
+      stmt.bindUint64(0, &idParam);
+
       if (stmt.execute() && stmt.storeResult() && stmt.fetch() == 0) {
         // Get item_id string
         char buf[256];
@@ -686,6 +690,137 @@ bool GCNetwork_Inventory::HandleScrapeSticker(
   if (updatedTarget) {
     SendSOSingleObject(p2psocket, steamId, SOTypeItem, *updatedTarget);
   }
+
+  return true;
+}
+
+// TRADE UPS
+bool GCNetwork_Inventory::HandleCraft(SNetSocket_t p2psocket, uint64_t steamId,
+                                      const CMsgGC_CC_CL2GC_Craft &message,
+                                      MYSQL *inventory_db) {
+  if (!inventory_db)
+    return false;
+
+  // 1. Validate Input Count
+  if (message.item_ids_size() != 10) {
+    logger::error("HandleCraft: Invalid item count %d (expected 10)",
+                  message.item_ids_size());
+    return false;
+  }
+
+  // 2. Fetch and Validate Inputs
+  std::vector<std::unique_ptr<CSOEconItem>> inputItems;
+  std::vector<CSOEconItem> rawInputs;
+  uint32_t expectedRarity = 0;
+
+  for (int i = 0; i < message.item_ids_size(); i++) {
+    uint64_t itemId = message.item_ids(i);
+    auto item = FetchItemFromDatabase(itemId, steamId, inventory_db);
+
+    if (!item) {
+      logger::error(
+          "HandleCraft: Item %llu not found or not owned by user %llu", itemId,
+          steamId);
+      return false;
+    }
+
+    // Check Rarity consistency
+    if (i == 0) {
+      expectedRarity = item->rarity();
+      // Cannot trade up Covert (Ancient) or higher
+      if (expectedRarity >= ItemSchema::RarityAncient) {
+        logger::error("HandleCraft: Cannot trade up rarity %u", expectedRarity);
+        return false;
+      }
+    } else {
+      if (item->rarity() != expectedRarity) {
+        logger::error("HandleCraft: Rarity mismatch (Item %llu has %u, "
+                      "expected %u)",
+                      itemId, item->rarity(), expectedRarity);
+        return false;
+      }
+    }
+
+    rawInputs.push_back(*item);
+    inputItems.push_back(std::move(item));
+  }
+
+  // 3. Determine Result
+  CSOEconItem resultItem;
+  // Initialize defaults for resultItem handled by SelectTradeUpResult but good
+  // practice
+  resultItem.set_account_id(steamId &
+                            0xFFFFFFFF); // Just lower 32 bits usually, or full?
+  // Actually SaveNewItemToDatabase handles account_id
+
+  if (!g_itemSchema->SelectTradeUpResult(rawInputs, resultItem)) {
+    logger::error("HandleCraft: Failed to determine trade up result");
+    return false;
+  }
+
+  // 4. Execute Transaction
+  SQLTransaction transaction(inventory_db);
+
+  // A. Delete Input Items
+  auto deleteStmtOpt = createPreparedStatement(
+      inventory_db, "DELETE FROM csgo_items WHERE id = ?");
+  if (!deleteStmtOpt)
+    return false;
+  auto &deleteStmt = *deleteStmtOpt;
+
+  for (const auto &input : inputItems) {
+    uint64_t id = input->id();
+    deleteStmt.bindUint64(0, &id);
+    if (!deleteStmt.execute()) {
+      logger::error("HandleCraft: Failed to delete input item %llu", id);
+      return false;
+    }
+  }
+
+  // B. Insert Output Item
+  uint64_t newId = SaveNewItemToDatabase(resultItem, steamId, inventory_db);
+  if (newId == 0) {
+    logger::error("HandleCraft: Failed to save result item");
+    return false;
+  }
+  resultItem.set_id(newId);
+
+  // C. Commit
+  if (!transaction.Commit()) {
+    logger::error("HandleCraft: Transaction commit failed");
+    return false;
+  }
+
+  // 5. Send Response
+  CMsgGC_CC_GC2CL_CraftResponse response;
+  response.set_response_index(message.recipe_defindex());
+  response.set_response_code(0); // Success?
+
+  // Add the item object for the reveal animation
+  SendSOSingleObject(p2psocket, steamId, SOTypeItem, resultItem,
+                     k_EMsgGC_CC_GC2CL_SOSingleObject);
+
+  // Wait, standard craft response also has item_object field?
+  // Logic: Send SOSingleObject separately so client gets the item "update",
+  // AND include it in response for the specific "Trade Up" UI event?
+  // Let's check proto again. Yes, field 3 is item_object.
+  // We should populate it directly in the response too.
+
+  CMsgSOSingleObject *so = response.mutable_item_object();
+  so->set_type_id(SOTypeItem);
+  // Manual serialization of object... generic CMsgSOSingleObject expects
+  // object_data as bytes
+  std::string itemBytes = resultItem.SerializeAsString();
+  so->set_object_data(itemBytes.data(), itemBytes.size());
+
+  // Send the specific response message
+  NetworkMessage netMsg =
+      NetworkMessage::FromProto(response, k_EMsgGC_CC_GC2CL_CraftResponse);
+  netMsg.WriteToSocket(p2psocket, true);
+
+  logger::info("HandleCraft: User %llu successfully traded up to Item %llu "
+               "(Def %u)",
+               steamId, newId, resultItem.def_index());
 
   return true;
 }
