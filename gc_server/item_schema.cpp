@@ -50,8 +50,17 @@ AttributeInfo::AttributeInfo(const KeyValue &key) {
       m_type = AttributeType::Float;
     }
   } else {
-    bool integer = key.GetNumber<int>("stored_as_integer");
-    m_type = integer ? AttributeType::Uint32 : AttributeType::Float;
+    int integer = key.GetNumber<int>("stored_as_integer", 0);
+    m_type = (integer != 0) ? AttributeType::Uint32 : AttributeType::Float;
+  }
+
+  // FORCE FIX: Attributes 6 (Paint Index) and 7 (Seed) MUST be floats for the
+  // client even if the schema (items_game.txt) claims they are integers/uint32.
+  // This override ensures SetAttributeFloat writes raw float bytes instead of
+  // casting to int.
+  uint32_t defIndex = FromString<uint32_t>(key.Name());
+  if (defIndex == 6 || defIndex == 7) {
+    m_type = AttributeType::Float;
   }
 }
 
