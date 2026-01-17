@@ -1,5 +1,5 @@
 #include "web_api_client.hpp"
-#include "json_parser_simple.hpp" // We might need a simple JSON parser or write one
+// #include "json_parser_simple.hpp" // Removed missing header
 #include "logger.hpp"
 #include "tunables_manager.hpp"
 #include <time.h>
