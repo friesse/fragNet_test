@@ -1,5 +1,6 @@
 #pragma once
 #include "cc_gcmessages.pb.h"
+#include "cstrike15_gcmessages.pb.h"
 #include "gc_const.hpp"
 #include "gcsdk_gcmessages.pb.h"
 
@@ -136,6 +137,12 @@ public:
   static bool HandleCraft(SNetSocket_t p2psocket, uint64_t steamId,
                           const CMsgGC_CC_CL2GC_Craft &message,
                           MYSQL *inventory_db);
+
+  // Missions
+  static bool HandleClientRequestNewMission(
+      SNetSocket_t p2psocket, uint64_t steamId,
+      const CMsgGCCstrike15_v2_ClientRequestNewMission &message,
+      MYSQL *inventory_db);
 
   // ATTRIBUTE HELPERS
   static void AddFloatAttribute(CSOEconItem *item, uint32_t defIndex,

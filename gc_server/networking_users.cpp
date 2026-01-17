@@ -3,6 +3,7 @@
 #include "prepared_stmt.hpp"
 #include "safe_parse.hpp"
 #include "steam/steam_api.h"
+#include "tunables_manager.hpp"
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -1048,9 +1049,15 @@ void GCNetwork_Users::BuildMatchmakingHello(
   // COOLDOWN
   GetPlayerCooldownInfo(steamId2, message, classiccounter_db);
 
-  // uhhh soon...?
-  message.set_player_level(1); // todo: fetch from db
-  message.set_player_cur_xp(0);
+  // XP / Rank Spoofing
+  if (TunablesManager::GetInstance().IsXPSpoofActive()) {
+    message.set_player_level(40); // Global General (Max Level)
+    message.set_player_cur_xp(2500);
+  } else {
+    message.set_player_level(1); // todo: fetch from db
+    message.set_player_cur_xp(0);
+  }
+
   // idk what this does
   message.set_player_xp_bonus_flags(0);
 }

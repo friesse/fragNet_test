@@ -1,0 +1,4 @@
+operation=true
+tournament_draft=true
+xp_spoof=true
+web_api_url=https://fragmount.net

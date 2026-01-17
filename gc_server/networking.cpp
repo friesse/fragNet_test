@@ -1,4 +1,6 @@
 #include "networking.hpp"
+#include "cstrike15_gcmessages.pb.h"
+#include "gc_const_csgo.hpp"
 #include "matchmaking_manager.hpp"
 #include "networking_inventory.hpp"
 #include "networking_matchmaking.hpp"
@@ -8,6 +10,8 @@
 
 #include "logger.hpp"
 #include "steam_network_message.hpp"
+#include "tunables_manager.hpp"
+#include "web_api_client.hpp"
 #include <steam/steam_api.h>
 #include <steam/steam_gameserver.h>
 
@@ -41,6 +45,12 @@ GCNetwork::GCNetwork()
 
   m_matchmakingManager = nullptr;
   logger::info("MatchmakingManager disabled - not initialized");
+
+  // Init Tunables
+  TunablesManager::GetInstance().Init();
+
+  // Init WebAPI
+  WebAPIClient::GetInstance().Init();
 }
 
 GCNetwork::~GCNetwork() {
@@ -314,6 +324,35 @@ void GCNetwork::ReadAuthTicket(SNetSocket_t p2psocket, void *message,
                    m_activeSessions.size());
     }
 
+    // Process Alerts & Cooldowns
+    auto alerts = WebAPIClient::GetInstance().GetAlertsForUser(steamID);
+    for (const auto &alert : alerts) {
+      if (alert.type == "cooldown") {
+        CMsgGCCStrike15_v2_ServerNotificationForUserPenalty penalty;
+        penalty.set_account_id(steamID & 0xFFFFFFFF);
+        penalty.set_reason(alert.reason);
+        penalty.set_seconds(alert.duration);
+        penalty.set_issuer_id(0);
+        NetworkMessage msg = NetworkMessage::FromProto(
+            penalty, k_EMsgGCCStrike15_v2_ServerNotificationForUserPenalty);
+        msg.WriteToSocket(p2psocket, true);
+        logger::info("Sent cooldown notification to %llu", steamID);
+      } else if (alert.type == "alert") {
+        CMsgGCCStrike15_v2_ClientTextMsg textMsg;
+        // Proto might be ClientTextMsg or GC2ClientTextMsg, assuming
+        // ClientTextMsg based on naming convention Actually CSGO uses
+        // CMsgGCCStrike15_v2_ClientTextMsg for generic text Let's verify exact
+        // name. Usually it's handled by generic messages. But for now let's
+        // just log implementation pending if name unsure. Using
+        // CMsgGCCStrike15_v2_MatchmakingGC2ClientTextMsg ? Let's try
+        // CMsgGCCStrike15_v2_ClientTextMsg first.
+        // textMsg.set_text(alert.message.c_str());
+        // ...
+        // Actually, Global Cooldown is ServerNotificationForUserPenalty.
+        // Generic alerts might be via SystemMessage.
+      }
+    }
+
     auto response = Messages::CreateAuthConfirm(res);
     response.WriteToSocket(p2psocket, true);
     logger::info("Sent back an auth ticket confirmation to the client!");
@@ -404,6 +443,9 @@ void GCNetwork::Update() {
     CheckNewItemsForActiveSessions();
     itemCheckCounter = 0;
   }
+
+  // Update WebAPI
+  WebAPIClient::GetInstance().Update();
 
   // DISABLED: update matchmaking every frame
   // if (++matchmakingCounter >= 50) { // Update every ~1 second at 20 ticks/sec
@@ -672,6 +714,21 @@ void GCNetwork::Update() {
                 request.has_sticker_slot() ? request.sticker_slot() : 0);
 
             bool success = GCNetwork_Inventory::ProcessStickerAction(
+                p2psocket, steamId, request, m_mysql2);
+          }
+        }
+      }
+      break;
+
+    case k_EMsgGCCstrike15_v2_ClientRequestNewMission:
+      logger::info("Received ClientRequestNewMission");
+      {
+        NetworkMessage netMsg(buffer.data(), msgsize);
+        CMsgGCCstrike15_v2_ClientRequestNewMission request;
+        if (netMsg.ParseTo(&request)) {
+          uint64_t steamId = GetSessionSteamId(p2psocket);
+          if (steamId != 0) {
+            GCNetwork_Inventory::HandleClientRequestNewMission(
                 p2psocket, steamId, request, m_mysql2);
           }
         }

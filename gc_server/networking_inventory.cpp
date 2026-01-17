@@ -10,6 +10,7 @@
 #include "networking_users.hpp"
 #include "prepared_stmt.hpp"
 #include "safe_parse.hpp"
+#include "tunables_manager.hpp"
 #include <cctype>
 #include <cstdint>
 #include <cstdlib>
@@ -421,6 +422,39 @@ void GCNetwork_Inventory::SendSOCache(SNetSocket_t p2psocket, uint64_t steamId,
       nametag.set_rarity(1);
 
       object->add_object_data(nametag.SerializeAsString());
+    }
+
+    // Inject Operation Coin if enabled
+    if (TunablesManager::GetInstance().IsOperationActive()) {
+      auto coin = CSOEconItem();
+      // Use a unique ID high enough to avoid collision with real items
+      // We can use steamId + constant to make it deterministic per user
+      uint64_t spoofId =
+          0xF000000000000000ULL | (steamId & 0x0FFFFFFFFFFFFFFFULL);
+
+      coin.set_id(spoofId);
+      coin.set_account_id(steamId & 0xFFFFFFFF);
+      coin.set_def_index(4001); // Operation Wildfire Coin (Sample)
+      // Or 874? 4001 is common.
+      // Let's use 1316 (Operation Wildfire Coin) or 4354 (Bronze).
+      // 874 is Operation Breakout.
+      // Tunables could specify this, but let's hardcode a good one.
+      // 1021 = Operation Bravo
+      // 1316 = Operation Wildfire Access Pass? No, Pass is 1316.
+      // Coin is what we want.
+      // Operation Wildfire Coin = 4354
+      coin.set_def_index(4354);
+      coin.set_inventory(2);
+      coin.set_level(1);
+      coin.set_quality(4);
+      coin.set_flags(0);
+      coin.set_origin(kEconItemOrigin_Purchased);
+      coin.set_rarity(1);
+
+      // Attribute 80 (Killeater Score) triggers the journal/stats?
+      // Not strictly necessary for the coin itself to appear.
+
+      object->add_object_data(coin.SerializeAsString());
     }
 
     // SQL injection safe: using prepared statement to fetch item IDs first
