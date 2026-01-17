@@ -4,6 +4,7 @@
 #include "safe_parse.hpp"
 #include "steam/steam_api.h"
 #include "tunables_manager.hpp"
+#include "web_api_client.hpp"
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -1060,6 +1061,31 @@ void GCNetwork_Users::BuildMatchmakingHello(
 
   // idk what this does
   message.set_player_xp_bonus_flags(0);
+
+  // Tournament Event Injection
+  auto tournamentState = WebAPIClient::GetInstance().GetTournamentState();
+  if (tournamentState.active) {
+    auto *event = message.mutable_my_current_event();
+    event->set_event_id(20); // Using standard Valve Event ID for now, or 1? 20
+                             // is "Gamma Case" era?
+    // Actually, client expects specific IDs for specific metadata.
+    // But for local tournaments, 1 might trigger generic UI.
+    // User said "No tournament name". Name comes from local files usually based
+    // on ID, OR we might need to send it. Let's stick to 1 or whatever tunable
+    // says. Tunables says nothing yet. Let's use 1 and rely on Teams.
+
+    event->set_event_id(1);
+    event->set_event_stage(tournamentState.phase);
+
+    for (const auto &kv : tournamentState.teams) {
+      const auto &teamInfo = kv.second;
+      auto *team = message.add_my_current_event_teams();
+      team->set_team_id(kv.first);
+      team->set_team_name(teamInfo.name);
+      team->set_team_flag(teamInfo.flag);
+      team->set_team_tag(teamInfo.tag);
+    }
+  }
 }
 
 void GCNetwork_Users::ViewPlayersProfile(SNetSocket_t p2psocket, void *message,

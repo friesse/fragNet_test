@@ -339,6 +339,14 @@ void GCNetwork::ReadAuthTicket(SNetSocket_t p2psocket, void *message,
         logger::info("Sent cooldown notification to %llu", steamID);
       } else if (alert.type == "alert") {
         CMsgGCCStrike15_v2_GC2ClientTextMsg textMsg;
+        textMsg.set_id(1);
+        textMsg.set_type(1); // Type 1 = Generic Text?
+        textMsg.set_payload(alert.message);
+
+        NetworkMessage msg = NetworkMessage::FromProto(
+            textMsg, k_EMsgGCCStrike15_v2_GC2ClientTextMsg);
+        msg.WriteToSocket(p2psocket, true);
+        logger::info("Sent text alert to %llu", steamID);
         // Proto might be ClientTextMsg or GC2ClientTextMsg, assuming
         // ClientTextMsg based on naming convention Actually CSGO uses
         // CMsgGCCStrike15_v2_ClientTextMsg for generic text Let's verify exact

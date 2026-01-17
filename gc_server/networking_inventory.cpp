@@ -434,17 +434,9 @@ void GCNetwork_Inventory::SendSOCache(SNetSocket_t p2psocket, uint64_t steamId,
 
       coin.set_id(spoofId);
       coin.set_account_id(steamId & 0xFFFFFFFF);
-      coin.set_def_index(4001); // Operation Wildfire Coin (Sample)
-      // Or 874? 4001 is common.
-      // Let's use 1316 (Operation Wildfire Coin) or 4354 (Bronze).
-      // 874 is Operation Breakout.
-      // Tunables could specify this, but let's hardcode a good one.
-      // 1021 = Operation Bravo
-      // 1316 = Operation Wildfire Access Pass? No, Pass is 1316.
-      // Coin is what we want.
-      // Operation Wildfire Coin = 4354
-      coin.set_def_index(4354);
-      coin.set_inventory(2);
+      // coin.set_def_index(4354); // Wildfire
+      coin.set_def_index(1021); // Operation Bravo Coin (Reliable fallback)
+      coin.set_inventory(4000); // High slot to avoid collision with real items
       coin.set_level(1);
       coin.set_quality(4);
       coin.set_flags(0);

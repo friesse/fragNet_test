@@ -8,7 +8,6 @@
 #include <string>
 #include <vector>
 
-
 // Callback type: success, response body
 typedef std::function<void(bool, const std::string &)> WebRequestCallback;
 
@@ -20,12 +19,19 @@ struct AlertInfo {
   int reason;   // for cooldown
 };
 
+struct TeamInfo {
+  std::string name;
+  std::string flag; // e.g. "se", "us"
+  std::string tag;  // e.g. "NiP"
+};
+
 struct TournamentState {
   bool active;
   uint32_t phase;          // 0=None, 1=Veto, 2=Pick
   int teamA;               // Terrorist
   int teamB;               // CT
   std::vector<int> drafts; // Map IDs
+  std::map<int, TeamInfo> teams;
 };
 
 class WebAPIClient {
