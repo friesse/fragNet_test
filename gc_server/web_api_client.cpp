@@ -134,7 +134,7 @@ void WebAPIClient::PollAlerts() {
 
 void WebAPIClient::PollTournament() {
   std::string baseUrl = TunablesManager::GetInstance().GetWebAPIUrl();
-  baseUrl + "/api/tournaments/gc_heartbeat.php";
+  std::string url = baseUrl + "/api/tournaments/gc_heartbeat.php";
 
   FetchJSON(url, [this](bool success, const std::string &data) {
     if (!success)
