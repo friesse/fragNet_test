@@ -1075,7 +1075,7 @@ void GCNetwork_Users::BuildMatchmakingHello(
     // says. Tunables says nothing yet. Let's use 1 and rely on Teams.
 
     event->set_event_id(1);
-    event->set_event_stage(tournamentState.phase);
+    event->set_event_stage_id(tournamentState.phase);
 
     for (const auto &kv : tournamentState.teams) {
       const auto &teamInfo = kv.second;
