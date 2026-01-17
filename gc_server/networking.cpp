@@ -470,8 +470,21 @@ void GCNetwork::Update() {
   SNetSocket_t p2psocket;
   uint32_t msgsize;
 
+  // Process packets with a Time Budget (e.g., 2ms) to prevent CPU spikes
+  // ("spreading like jam")
+  auto timeBudgetStart = std::chrono::steady_clock::now();
+  const auto MAX_PROCESSING_TIME = std::chrono::milliseconds(2);
+
   while (SteamGameServerNetworking()->IsDataAvailable(listen_socket, &msgsize,
                                                       &p2psocket)) {
+    // Check budget
+    auto cTime = std::chrono::steady_clock::now();
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(
+            cTime - timeBudgetStart) >= MAX_PROCESSING_TIME) {
+      // Stop processing to yield CPU. Remaining packets will be handled next
+      // tick.
+      break;
+    }
     std::vector<uint8_t> buffer(msgsize);
 
     if (!SteamGameServerNetworking()->RetrieveDataFromSocket(
