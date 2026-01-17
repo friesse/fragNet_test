@@ -23,7 +23,6 @@ add_executable(gc-server WIN32
     
     # Matchmaking system
     matchmaking_manager.cpp
-    production_matchmaking.cpp
     mysql_database.cpp
     gameserver_manager.cpp)
 

@@ -6,6 +6,7 @@
 #include "networking_matchmaking.hpp"
 #include "networking_users.hpp"
 #include "stdafx.h"
+#include <chrono>
 #include <sstream>
 
 #include "logger.hpp"
@@ -436,20 +437,23 @@ void SendHeartbeat(SNetSocket_t p2psocket) {
 }
 
 void GCNetwork::Update() {
-  // cleanup sessions
-  static int updateCounter = 0;
-  static int itemCheckCounter = 0;
-  static int matchmakingCounter = 0;
+  // Time-based periodic updates
+  // cleanup sessions every 60 seconds
+  static auto lastCleanup = std::chrono::steady_clock::now();
+  auto now = std::chrono::steady_clock::now();
 
-  if (++updateCounter >= 1000) {
+  if (std::chrono::duration_cast<std::chrono::seconds>(now - lastCleanup)
+          .count() >= 60) {
     CleanupSessions();
-    updateCounter = 0;
+    lastCleanup = now;
   }
 
   // check for new items every 5 seconds
-  if (++itemCheckCounter >= 250) {
+  static auto lastItemCheck = std::chrono::steady_clock::now();
+  if (std::chrono::duration_cast<std::chrono::seconds>(now - lastItemCheck)
+          .count() >= 5) {
     CheckNewItemsForActiveSessions();
-    itemCheckCounter = 0;
+    lastItemCheck = now;
   }
 
   // Update WebAPI

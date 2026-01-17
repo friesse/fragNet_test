@@ -1,8 +1,9 @@
 #include "main.hpp"
 #include "platform.hpp"
-#include "production_matchmaking.hpp"
 #include "safe_parse.hpp"
 #include "stdafx.h"
+#include <chrono>
+#include <thread>
 
 #include <cstdlib> // for getenv, atoi
 #include <cstring>
@@ -81,15 +82,13 @@ int main() {
 
   m_network.Init(BIND_IP, GAME_PORT);
 
-  // Initialize Production Matchmaking System
-  logger::info("Initializing Production Matchmaking System...");
-  ProductionMatchmaker::Instance().Initialize();
+  logger::info("GC Server initialized successfully. Starting main loop...");
 
   while (true) {
     m_network.Update();
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
   }
 
   // Cleanup on exit
-  ProductionMatchmaker::Instance().Shutdown();
   return 1;
 }
