@@ -332,13 +332,13 @@ void GCNetwork::ReadAuthTicket(SNetSocket_t p2psocket, void *message,
         penalty.set_account_id(steamID & 0xFFFFFFFF);
         penalty.set_reason(alert.reason);
         penalty.set_seconds(alert.duration);
-        penalty.set_issuer_id(0);
+        // penalty.set_issuer_id(0); // Member does not exist in proto
         NetworkMessage msg = NetworkMessage::FromProto(
             penalty, k_EMsgGCCStrike15_v2_ServerNotificationForUserPenalty);
         msg.WriteToSocket(p2psocket, true);
         logger::info("Sent cooldown notification to %llu", steamID);
       } else if (alert.type == "alert") {
-        CMsgGCCStrike15_v2_ClientTextMsg textMsg;
+        CMsgGCCStrike15_v2_GC2ClientTextMsg textMsg;
         // Proto might be ClientTextMsg or GC2ClientTextMsg, assuming
         // ClientTextMsg based on naming convention Actually CSGO uses
         // CMsgGCCStrike15_v2_ClientTextMsg for generic text Let's verify exact
@@ -720,7 +720,7 @@ void GCNetwork::Update() {
       }
       break;
 
-    case k_EMsgGCCstrike15_v2_ClientRequestNewMission:
+    case k_EMsgGCCStrike15_v2_ClientRequestNewMission:
       logger::info("Received ClientRequestNewMission");
       {
         NetworkMessage netMsg(buffer.data(), msgsize);
