@@ -2842,3 +2842,15 @@ bool GCNetwork_Inventory::IsDefaultItemId(uint64_t itemId, uint32_t &defIndex,
  * @param inventory_db Database connection
  * @return True if sticker was successfully scraped
  */
+
+// Implement HandleClientRequestNewMission
+bool GCNetwork_Inventory::HandleClientRequestNewMission(
+    SNetSocket_t p2psocket, uint64_t steamId,
+    const CMsgGCCstrike15_v2_ClientRequestNewMission &message,
+    MYSQL *inventory_db) {
+
+  logger::info("HandleClientRequestNewMission: User %llu requested mission %u "
+               "campaign %u",
+               steamId, message.mission_id(), message.campaign_id());
+  return true;
+}

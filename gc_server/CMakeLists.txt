@@ -12,6 +12,8 @@ add_executable(gc-server WIN32
     steam_network_message.cpp
     logger.cpp
     tcp_networking.cpp
+    tunables_manager.cpp
+    web_api_client.cpp
     
     inventory.cpp
     item_schema.cpp
