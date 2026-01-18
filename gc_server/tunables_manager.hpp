@@ -19,6 +19,8 @@ public:
   bool IsTournamentDraftEnabled() const;
   bool IsXPSpoofActive() const;
   std::string GetWebAPIUrl() const;
+  bool IsOptimized() const;
+  int GetCacheSizeMB() const;
 
   // Generic getters
   bool GetBool(const std::string &key, bool defaultValue = false) const;

@@ -72,11 +72,14 @@ bool GCNetwork::InitDatabases() {
   // Create connection pools (#6 enhancement)
   try {
     m_classicPool = std::make_shared<DBConnectionPool>(
-        "localhost", "gc", "61lol61w", "classiccounter", 3306, 3);
+        "89.117.56.19", "classiccounter_user", "ClassicC0unter!DB2025",
+        "classiccounter", 3306, 3);
     m_inventoryPool = std::make_shared<DBConnectionPool>(
-        "localhost", "gc", "61lol61w", "ollum_inventory", 3306, 5);
+        "89.117.56.19", "classiccounter_user", "ClassicC0unter!DB2025",
+        "ollum_inventory", 3306, 5);
     m_rankedPool = std::make_shared<DBConnectionPool>(
-        "localhost", "gc", "61lol61w", "ollum_ranked", 3306, 3);
+        "89.117.56.19", "classiccounter_user", "ClassicC0unter!DB2025",
+        "ollum_ranked", 3306, 3);
     logger::info("Connection pools created successfully");
   } catch (const std::exception &e) {
     logger::error("Failed to create connection pools: %s", e.what());
@@ -95,16 +98,18 @@ bool GCNetwork::InitDatabases() {
   }
 
   // 1ST DB CONNECTION (legacy)
-  if (!mysql_real_connect(m_mysql1, "localhost", "gc", "61lol61w",
-                          "classiccounter", 3306, NULL, 0)) {
+  if (!mysql_real_connect(m_mysql1, "89.117.56.19", "classiccounter_user",
+                          "ClassicC0unter!DB2025", "classiccounter", 3306, NULL,
+                          0)) {
     logger::error("Failed to connect to database1: %s", mysql_error(m_mysql1));
     return false;
   }
   logger::info("Connected to classiccounter DB successfully!");
 
   // 2ND DB CONNECTION (legacy)
-  if (!mysql_real_connect(m_mysql2, "localhost", "gc", "61lol61w",
-                          "ollum_inventory", 3306, NULL, 0)) {
+  if (!mysql_real_connect(m_mysql2, "89.117.56.19", "classiccounter_user",
+                          "ClassicC0unter!DB2025", "ollum_inventory", 3306,
+                          NULL, 0)) {
     logger::error("Failed to connect to database2: %s", mysql_error(m_mysql2));
     mysql_close(m_mysql1);
     return false;
@@ -112,8 +117,9 @@ bool GCNetwork::InitDatabases() {
   logger::info("Connected to ollum_inventory DB successfully!");
 
   // 3RD DB CONNECTION (legacy)
-  if (!mysql_real_connect(m_mysql3, "localhost", "gc", "61lol61w",
-                          "ollum_ranked", 3306, NULL, 0)) {
+  if (!mysql_real_connect(m_mysql3, "89.117.56.19", "classiccounter_user",
+                          "ClassicC0unter!DB2025", "ollum_ranked", 3306, NULL,
+                          0)) {
     logger::error("Failed to connect to database3: %s", mysql_error(m_mysql3));
     mysql_close(m_mysql1);
     mysql_close(m_mysql2);
@@ -445,6 +451,43 @@ void GCNetwork::Update() {
   if (std::chrono::duration_cast<std::chrono::seconds>(now - lastCleanup)
           .count() >= 60) {
     CleanupSessions();
+
+    // Enforce Tunable Cache Size (Session Limit)
+    // Heuristic: 1MB per session (roughly)
+    int maxSessions = TunablesManager::GetInstance().GetCacheSizeMB();
+
+    std::unique_lock<std::shared_mutex> lock(m_sessionsMutex);
+    while (m_activeSessions.size() > (size_t)maxSessions) {
+      // Evict oldest session
+      auto oldestIt = m_activeSessions.end();
+      time_t oldestTime = std::numeric_limits<time_t>::max();
+
+      for (auto it = m_activeSessions.begin(); it != m_activeSessions.end();
+           ++it) {
+        if (it->second.lastActivity < oldestTime) {
+          oldestTime = it->second.lastActivity;
+          oldestIt = it;
+        }
+      }
+
+      if (oldestIt != m_activeSessions.end()) {
+        uint64_t steamId = oldestIt->first;
+        SNetSocket_t socket = oldestIt->second.socket;
+
+        if (socket != k_HSteamNetConnection_Invalid) {
+          m_socketToSteamId.erase(socket);
+          SteamGameServerNetworking()->CloseConnection(
+              socket, k_ESteamNetConnectionEnd_App_Min, "Session Limit Reached",
+              false);
+        }
+        m_activeSessions.erase(oldestIt);
+        logger::info("Evicted session %llu (Cache Limit: %d MB)", steamId,
+                     maxSessions);
+      } else {
+        break; // Should not happen
+      }
+    }
+
     lastCleanup = now;
   }
 
@@ -470,10 +513,14 @@ void GCNetwork::Update() {
   SNetSocket_t p2psocket;
   uint32_t msgsize;
 
-  // Process packets with a Time Budget (e.g., 2ms) to prevent CPU spikes
-  // ("spreading like jam")
+  // Process packets with a Time Budget to prevent CPU spikes ("spreading like
+  // jam")
+  bool optimize = TunablesManager::GetInstance().IsOptimized();
+
+  // Optimized: 5ms budget (increased from 2ms per user request).
+  // Unoptimized: 50ms budget (practically unlimited for network I/O).
+  const auto MAX_PROCESSING_TIME = std::chrono::milliseconds(optimize ? 5 : 50);
   auto timeBudgetStart = std::chrono::steady_clock::now();
-  const auto MAX_PROCESSING_TIME = std::chrono::milliseconds(2);
 
   while (SteamGameServerNetworking()->IsDataAvailable(listen_socket, &msgsize,
                                                       &p2psocket)) {

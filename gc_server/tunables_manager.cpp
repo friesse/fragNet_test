@@ -76,6 +76,17 @@ std::string TunablesManager::GetWebAPIUrl() const {
   return GetString("web_api_url", "https://fragmount.net");
 }
 
+bool TunablesManager::IsOptimized() const { return GetBool("optimise", true); }
+
+int TunablesManager::GetCacheSizeMB() const {
+  int val = GetInt("cache_size_mb", 512);
+  if (val < 1)
+    return 1;
+  if (val > 2048)
+    return 2048; // Max 2GB
+  return val;
+}
+
 // Generic getters
 bool TunablesManager::GetBool(const std::string &key, bool defaultValue) const {
   std::lock_guard<std::mutex> lock(m_mutex);

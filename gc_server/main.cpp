@@ -86,7 +86,11 @@ int main() {
 
   while (true) {
     m_network.Update();
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    // Use Tunables for optimization control
+    // Optimized: 50ms sleep (approx 20Hz) - "Spread like jam"
+    // Unoptimized: 1ms sleep (approx 1000Hz) - "Max Perf"
+    bool optimize = TunablesManager::GetInstance().IsOptimized();
+    std::this_thread::sleep_for(std::chrono::milliseconds(optimize ? 50 : 1));
   }
 
   // Cleanup on exit
