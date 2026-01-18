@@ -476,9 +476,7 @@ void GCNetwork::Update() {
 
         if (socket != k_HSteamNetConnection_Invalid) {
           m_socketToSteamId.erase(socket);
-          SteamGameServerNetworking()->CloseConnection(
-              socket, k_ESteamNetConnectionEnd_App_Min, "Session Limit Reached",
-              false);
+          SteamGameServerNetworking()->DestroySocket(socket, true);
         }
         m_activeSessions.erase(oldestIt);
         logger::info("Evicted session %llu (Cache Limit: %d MB)", steamId,

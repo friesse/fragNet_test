@@ -2,6 +2,7 @@
 #include "platform.hpp"
 #include "safe_parse.hpp"
 #include "stdafx.h"
+#include "tunables_manager.hpp"
 #include <chrono>
 #include <thread>
 
