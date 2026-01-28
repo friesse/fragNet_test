@@ -71,15 +71,26 @@ GCNetwork::~GCNetwork() {
 bool GCNetwork::InitDatabases() {
   // Create connection pools (#6 enhancement)
   try {
+    // Determine pool size based on threading mode
+    bool singleThreaded = TunablesManager::GetInstance().IsSingleThreaded();
+    size_t poolSizeClassic = singleThreaded ? 1 : 3;
+    size_t poolSizeInventory = singleThreaded ? 1 : 5;
+    size_t poolSizeRanked = singleThreaded ? 1 : 3;
+
+    if (singleThreaded) {
+      logger::info(
+          "Running in SINGLE-THREADED mode: DB Connection Pools limited to 1");
+    }
+
     m_classicPool = std::make_shared<DBConnectionPool>(
         "89.117.56.19", "classiccounter_user", "ClassicC0unter!DB2025",
-        "classiccounter", 3306, 3);
+        "classiccounter", 3306, poolSizeClassic);
     m_inventoryPool = std::make_shared<DBConnectionPool>(
         "89.117.56.19", "classiccounter_user", "ClassicC0unter!DB2025",
-        "ollum_inventory", 3306, 5);
+        "ollum_inventory", 3306, poolSizeInventory);
     m_rankedPool = std::make_shared<DBConnectionPool>(
         "89.117.56.19", "classiccounter_user", "ClassicC0unter!DB2025",
-        "ollum_ranked", 3306, 3);
+        "ollum_ranked", 3306, poolSizeRanked);
     logger::info("Connection pools created successfully");
   } catch (const std::exception &e) {
     logger::error("Failed to create connection pools: %s", e.what());

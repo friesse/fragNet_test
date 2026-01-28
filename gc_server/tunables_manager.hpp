@@ -20,6 +20,7 @@ public:
   bool IsXPSpoofActive() const;
   std::string GetWebAPIUrl() const;
   bool IsOptimized() const;
+  bool IsSingleThreaded() const;
   int GetCacheSizeMB() const;
 
   // Generic getters

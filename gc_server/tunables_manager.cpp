@@ -76,7 +76,22 @@ std::string TunablesManager::GetWebAPIUrl() const {
   return GetString("web_api_url", "https://fragmount.net");
 }
 
-bool TunablesManager::IsOptimized() const { return GetBool("optimise", true); }
+bool TunablesManager::IsOptimized() const {
+  if (IsSingleThreaded()) {
+    return true; // Forced optimization in single-threaded mode
+  }
+  return GetBool("optimise", true);
+}
+
+bool TunablesManager::IsSingleThreaded() const {
+  using namespace std::string_literals;
+  // Check for various keys to be user-friendly
+  if (GetBool("single_threaded", false))
+    return true;
+  if (GetBool("singlethreaded", false))
+    return true;
+  return false;
+}
 
 int TunablesManager::GetCacheSizeMB() const {
   int val = GetInt("cache_size_mb", 512);
